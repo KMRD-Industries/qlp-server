@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"log"
 	"net"
 	"net/netip"
@@ -78,7 +79,7 @@ func handleTCP(id uint32, conn *net.TCPConn) {
 		conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
 		_, err := conn.Read(b)
 
-		if errors.Is(err, net.ErrClosed) {
+		if errors.Is(err, io.EOF) {
 			msg.Id = id
 			msg.Variant = pb.StateVariant_DISCONNECTED
 
@@ -86,6 +87,8 @@ func handleTCP(id uint32, conn *net.TCPConn) {
 				encoded, _ := proto.Marshal(msg)
 				c.Write(encoded)
 			}
+			log.Printf("disconnected %d\n", id)
+
 			delete(tcp_conns, id)
 			break
 		}
