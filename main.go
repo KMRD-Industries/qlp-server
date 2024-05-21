@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"slices"
 	"time"
 
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
@@ -20,7 +21,8 @@ const (
 var (
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, 32)
-	tcp_conns = make(map[uint32]net.Conn, 32)
+	tcp_conns = make(map[uint32]*net.TCPConn, 32)
+	ids       = make([]uint32, 32, 32)
 )
 
 func listenTCP() {
@@ -39,6 +41,11 @@ func listenTCP() {
 
 	var id uint32 = 1
 	for ; ; id++ {
+		id = ids[0]
+		ids[0] = 9999
+		slices.Sort(ids)
+		ids = slices.Delete(ids, len(ids)-1, len(ids))
+
 		conn, err := listener.AcceptTCP()
 
 		if err != nil {
@@ -50,6 +57,7 @@ func listenTCP() {
 				Variant: pb.StateVariant_CONNECTED,
 			}
 			encoded, _ := proto.Marshal(msg)
+			log.Printf("sending: %v\n", encoded)
 
 			conn.Write(encoded)
 			// these will be monitored (we're assuming that closing conn means losing connection)
@@ -72,7 +80,16 @@ func handleTCP(id uint32, conn *net.TCPConn) {
 	for otherID, c := range tcp_conns {
 		msg.Id = otherID
 		encoded, _ := proto.Marshal(msg)
+		conn.Write(encoded)
+
+		if otherID == id {
+			continue
+		}
+
+		msg.Id = id
+		encoded, _ = proto.Marshal(msg)
 		c.Write(encoded)
+		log.Printf("sending: %v\n", encoded)
 	}
 
 	for {
@@ -89,6 +106,8 @@ func handleTCP(id uint32, conn *net.TCPConn) {
 			}
 			log.Printf("disconnected %d\n", id)
 
+			ids = append(ids, id)
+			slices.Sort(ids)
 			delete(tcp_conns, id)
 			break
 		}
@@ -142,6 +161,10 @@ func handleUDP() {
 }
 
 func main() {
+	for i := 0; i < 32; i++ {
+		ids[i] = uint32(i + 1)
+	}
+
 	go handleUDP()
 	go listenTCP()
 
