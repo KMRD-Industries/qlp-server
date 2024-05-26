@@ -78,7 +78,7 @@ func listenTCP() {
 }
 
 // for now only for sending ids
-func handleTCP() {
+func handleTCP(ch chan uint32) {
 	b := make([]byte, BUF_SIZE)
 
 	msg := &pb.StateUpdate{
@@ -92,6 +92,7 @@ func handleTCP() {
 			_, err := conn.Read(b)
 
 			if errors.Is(err, io.EOF) {
+				ch <- id
 				msg.Id = id
 				msg.Variant = pb.StateVariant_DISCONNECTED
 
@@ -109,14 +110,13 @@ func handleTCP() {
 					conn.Close()
 					delete(connections.TcpConns, id)
 				}
-				break
 			}
 		}
 		connections.Lock.Unlock()
 	}
 }
 
-func handleUDP() {
+func handleUDP(ch chan uint32) {
 	addr := net.UDPAddr{
 		Port: SERVER_PORT,
 		IP:   ip,
@@ -134,6 +134,12 @@ func handleUDP() {
 	for {
 		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		n, sender, err := conn.ReadFromUDP(b)
+
+		select {
+		case id := <-ch:
+			delete(addrPorts, id)
+		default:
+		}
 
 		if err == nil {
 			received := &pb.PositionUpdate{}
@@ -156,7 +162,6 @@ func handleUDP() {
 				if otherID != id {
 					udpAddr := net.UDPAddrFromAddrPort(addrPort)
 					conn.WriteToUDP(b[:n], udpAddr)
-					// log.Printf("sending %d -> %d\n", id, otherID)
 				}
 			}
 		}
@@ -164,9 +169,10 @@ func handleUDP() {
 }
 
 func main() {
-	go handleUDP()
+	ch := make(chan uint32, 32)
+	go handleUDP(ch)
 	go listenTCP()
-	go handleTCP()
+	go handleTCP(ch)
 
 	for {
 	}
