@@ -68,10 +68,11 @@ func listenTCP() {
 				encoded, _ = proto.Marshal(msg)
 				c.Write(encoded)
 			}
-			connections.Lock.Unlock()
 
 			// these will be monitored (we're assuming that closing conn means losing connection)
-			connections.Store(id, conn)
+			connections.TcpConns[id] = conn
+			connections.Lock.Unlock()
+
 		}
 	}
 }
@@ -103,7 +104,11 @@ func handleTCP() {
 				log.Printf("disconnected %d\n", id)
 
 				ids.ReturnID(id)
-				connections.Delete(id)
+
+				if conn, ok := connections.TcpConns[id]; ok {
+					conn.Close()
+					delete(connections.TcpConns, id)
+				}
 				break
 			}
 		}

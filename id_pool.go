@@ -23,6 +23,7 @@ func NewIDPool() *IDPool {
 
 func (p *IDPool) GetID() uint32 {
 	p.lock.Lock()
+	defer p.lock.Unlock()
 
 	if p.availableIDs.Len() > 0 {
 		return heap.Pop(p.availableIDs).(uint32)
@@ -30,7 +31,6 @@ func (p *IDPool) GetID() uint32 {
 	id := p.nextID
 	p.nextID++
 
-	p.lock.Unlock()
 	return id
 }
 
