@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"net/netip"
-	"slices"
 	"time"
 
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
@@ -19,10 +18,10 @@ const (
 )
 
 var (
-	ip        = net.ParseIP("127.0.0.1")
-	addrPorts = make(map[uint32]netip.AddrPort, 32)
-	tcp_conns = make(map[uint32]*net.TCPConn, 32)
-	ids       = make([]uint32, 32, 32)
+	ip          = net.ParseIP("127.0.0.1")
+	addrPorts   = make(map[uint32]netip.AddrPort, 32)
+	connections = NewClientPool(32)
+	ids         = NewIDPool()
 )
 
 func listenTCP() {
@@ -39,14 +38,9 @@ func listenTCP() {
 	}
 	defer listener.Close()
 
-	var id uint32 = 1
-	for ; ; id++ {
-		id = ids[0]
-		ids[0] = 9999
-		slices.Sort(ids)
-		ids = slices.Delete(ids, len(ids)-1, len(ids))
-
+	for {
 		conn, err := listener.AcceptTCP()
+		id := ids.GetID()
 
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
@@ -57,60 +51,63 @@ func listenTCP() {
 				Variant: pb.StateVariant_CONNECTED,
 			}
 			encoded, _ := proto.Marshal(msg)
-			log.Printf("sending: %v\n", encoded)
+			log.Printf("connected: %d\n", id)
 
 			conn.Write(encoded)
-			// these will be monitored (we're assuming that closing conn means losing connection)
-			tcp_conns[id] = conn
 
-			go handleTCP(id, conn)
+			connections.Lock.Lock()
+			for otherID, c := range connections.TcpConns {
+				log.Printf("comm: %d %d\n", id, otherID)
+				// inform new player of those already connected
+				msg.Id = otherID
+				encoded, _ = proto.Marshal(msg)
+				conn.Write(encoded)
+
+				// inform connected players of new one
+				msg.Id = id
+				encoded, _ = proto.Marshal(msg)
+				c.Write(encoded)
+			}
+			connections.Lock.Unlock()
+
+			// these will be monitored (we're assuming that closing conn means losing connection)
+			connections.Store(id, conn)
 		}
 	}
 }
 
 // for now only for sending ids
-func handleTCP(id uint32, conn *net.TCPConn) {
+func handleTCP() {
 	b := make([]byte, BUF_SIZE)
-	defer conn.Close()
 
 	msg := &pb.StateUpdate{
 		Variant: pb.StateVariant_CONNECTED,
 	}
 
-	for otherID, c := range tcp_conns {
-		msg.Id = otherID
-		encoded, _ := proto.Marshal(msg)
-		conn.Write(encoded)
-
-		if otherID == id {
-			continue
-		}
-
-		msg.Id = id
-		encoded, _ = proto.Marshal(msg)
-		c.Write(encoded)
-		log.Printf("sending: %v\n", encoded)
-	}
-
 	for {
-		conn.SetReadDeadline(time.Now().Add(2000 * time.Millisecond))
-		_, err := conn.Read(b)
+		connections.Lock.Lock()
+		for id, conn := range connections.TcpConns {
+			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+			_, err := conn.Read(b)
 
-		if errors.Is(err, io.EOF) {
-			msg.Id = id
-			msg.Variant = pb.StateVariant_DISCONNECTED
+			if errors.Is(err, io.EOF) {
+				msg.Id = id
+				msg.Variant = pb.StateVariant_DISCONNECTED
 
-			for _, c := range tcp_conns {
-				encoded, _ := proto.Marshal(msg)
-				c.Write(encoded)
+				for otherID, c := range connections.TcpConns {
+					if otherID != id {
+						encoded, _ := proto.Marshal(msg)
+						c.Write(encoded)
+					}
+				}
+				log.Printf("disconnected %d\n", id)
+
+				ids.ReturnID(id)
+				connections.Delete(id)
+				break
 			}
-			log.Printf("disconnected %d\n", id)
-
-			ids = append(ids, id)
-			slices.Sort(ids)
-			delete(tcp_conns, id)
-			break
 		}
+		connections.Lock.Unlock()
 	}
 }
 
@@ -154,6 +151,7 @@ func handleUDP() {
 				if otherID != id {
 					udpAddr := net.UDPAddrFromAddrPort(addrPort)
 					conn.WriteToUDP(b[:n], udpAddr)
+					// log.Printf("sending %d -> %d\n", id, otherID)
 				}
 			}
 		}
@@ -161,12 +159,9 @@ func handleUDP() {
 }
 
 func main() {
-	for i := 0; i < 32; i++ {
-		ids[i] = uint32(i + 1)
-	}
-
 	go handleUDP()
 	go listenTCP()
+	go handleTCP()
 
 	for {
 	}
