@@ -13,26 +13,43 @@ const (
 	RIGHT     = iota
 	IDLE      = iota
 	MAX       = 100
+	MIN       = -999
 )
 
-type cell struct {
+type AIAlgorithm struct {
+	width      int
+	height     int
+	collisions []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
+	players    []*Player
+	graph      *[][]int
+}
+
+type Cell struct {
 	direction int
 	value     int
 }
 
-func NewAI(width, height int, collisions []Coordinate, player Coordinate) *AIAlgorithm {
-	graph := make([][]int, height)
-	for i := range graph {
-		graph[i] = make([]int, width)
-	}
-	for _, val := range collisions {
-		graph[val.X][val.Y] = -1
-	}
-	graph[player.X][player.Y] = MAX
-	return &AIAlgorithm{width: width, height: height, collisions: collisions, player: player, graph: &graph}
+func (c *Cell) GetCellValue() int {
+	return c.value
 }
 
-func (a *AIAlgorithm) CreateDistancesMap() {
+type Coordinate struct {
+	X, Y int
+}
+
+// TODO porpaw to bo wygląda jak gówno
+func GetPaths(width, height int, collisions []Coordinate, players []*Player) [][]Cell {
+	algorithm := AIAlgorithm{}
+	return algorithm.createDistancesMap(width, height, collisions, players)
+}
+
+func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordinate, players []*Player) [][]Cell {
+	a.width = width
+	a.height = height
+	a.collisions = collisions
+	a.players = players
+
+	a.initGraph()
 	paths, err := a.bfs()
 	if err != nil {
 		fmt.Println(err)
@@ -41,16 +58,47 @@ func (a *AIAlgorithm) CreateDistancesMap() {
 	for _, row := range paths {
 		fmt.Println(row)
 	}
+
+	return paths
 }
 
-func (a *AIAlgorithm) bfs() ([][]cell, error) {
-	queue := Queue{}
-	queue.put(a.player)
-	parent := make([][]cell, a.height)
-	for i := range parent {
-		parent[i] = make([]cell, a.width)
+func (a *AIAlgorithm) initGraph() {
+	graph := make([][]int, a.height)
+	for i := range graph {
+		graph[i] = make([]int, a.width)
 	}
-	parent[a.player.X][a.player.Y] = cell{IDLE, MAX}
+	for _, val := range a.collisions {
+		graph[val.X][val.Y] = -1
+	}
+	a.graph = &graph
+	a.addPlayers()
+	a.addCollisions()
+}
+
+func (a *AIAlgorithm) addPlayers() {
+	for _, player := range a.players {
+		(*a.graph)[player.position.X][player.position.Y] = MAX
+	}
+}
+
+func (a *AIAlgorithm) addCollisions() {
+	for _, coll := range a.collisions {
+		(*a.graph)[coll.X][coll.Y] = MIN
+	}
+}
+
+func (a *AIAlgorithm) bfs() ([][]Cell, error) {
+	queue := Queue{}
+	parent := make([][]Cell, a.height)
+	for i := range parent {
+		parent[i] = make([]Cell, a.width)
+	}
+
+	for _, p := range a.players {
+		queue.put(p.position)
+		parent[p.position.X][p.position.Y] = Cell{IDLE, MAX}
+	}
+
 	for {
 		if queue.isEmpty() {
 			break
@@ -66,7 +114,11 @@ func (a *AIAlgorithm) bfs() ([][]cell, error) {
 			val := (*a.graph)[next.X][next.Y]
 			if found.direction == 0 && val != IDLE && val != COLLISION {
 				queue.put(next)
-				parent[next.X][next.Y] = cell{a.parseToMove(current, next), parent[current.X][current.Y].value - 1}
+				distance := parent[current.X][current.Y].value - 1
+				if distance < parent[next.X][next.Y].value {
+					distance = parent[next.X][next.Y].value
+				}
+				parent[next.X][next.Y] = Cell{a.parseToMove(current, next), distance}
 			}
 		}
 	}
