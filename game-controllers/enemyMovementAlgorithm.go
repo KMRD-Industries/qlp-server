@@ -29,6 +29,10 @@ type Cell struct {
 	value     int
 }
 
+func (c *Cell) GetDirection() int {
+	return c.direction
+}
+
 func (c *Cell) GetCellValue() int {
 	return c.value
 }
@@ -43,6 +47,7 @@ func GetPaths(width, height int, collisions []Coordinate, players []*Player) [][
 	return algorithm.createDistancesMap(width, height, collisions, players)
 }
 
+// TODO dodaj do każdej komórki id gracza
 func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordinate, players []*Player) [][]Cell {
 	a.width = width
 	a.height = height
@@ -67,23 +72,26 @@ func (a *AIAlgorithm) initGraph() {
 	for i := range graph {
 		graph[i] = make([]int, a.width)
 	}
-	for _, val := range a.collisions {
-		graph[val.X][val.Y] = -1
-	}
+
 	a.graph = &graph
 	a.addPlayers()
 	a.addCollisions()
+
+	//for _, row := range *a.graph {
+	//	fmt.Println(row)
+	//}
 }
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
-		(*a.graph)[player.position.X][player.position.Y] = MAX
+		position := player.GetPosition()
+		(*a.graph)[position.Y][position.X] = MAX
 	}
 }
 
 func (a *AIAlgorithm) addCollisions() {
 	for _, coll := range a.collisions {
-		(*a.graph)[coll.X][coll.Y] = MIN
+		(*a.graph)[coll.Y][coll.X] = MIN
 	}
 }
 
@@ -95,8 +103,9 @@ func (a *AIAlgorithm) bfs() ([][]Cell, error) {
 	}
 
 	for _, p := range a.players {
-		queue.put(p.position)
-		parent[p.position.X][p.position.Y] = Cell{IDLE, MAX}
+		player := p.GetPosition()
+		queue.put(player)
+		parent[player.Y][player.X] = Cell{IDLE, MAX}
 	}
 
 	for {
@@ -110,15 +119,15 @@ func (a *AIAlgorithm) bfs() ([][]Cell, error) {
 		}
 
 		for _, next := range a.getNeighbors(current) {
-			found := parent[next.X][next.Y]
-			val := (*a.graph)[next.X][next.Y]
+			found := parent[next.Y][next.X]
+			val := (*a.graph)[next.Y][next.X]
 			if found.direction == 0 && val != IDLE && val != COLLISION {
 				queue.put(next)
-				distance := parent[current.X][current.Y].value - 1
-				if distance < parent[next.X][next.Y].value {
-					distance = parent[next.X][next.Y].value
+				distance := parent[current.Y][current.X].value - 1
+				if distance < parent[next.Y][next.X].value {
+					distance = parent[next.Y][next.X].value
 				}
-				parent[next.X][next.Y] = Cell{a.parseToMove(current, next), distance}
+				parent[next.Y][next.X] = Cell{a.parseToMove(current, next), distance}
 			}
 		}
 	}
@@ -130,15 +139,15 @@ func (a *AIAlgorithm) parseToMove(current, next Coordinate) int {
 	move := IDLE
 	if current.X-next.X == 0 {
 		if current.Y > next.Y {
-			move = RIGHT
-		} else {
-			move = LEFT
-		}
-	} else {
-		if current.X > next.X {
 			move = DOWN
 		} else {
 			move = UP
+		}
+	} else {
+		if current.X > next.X {
+			move = RIGHT
+		} else {
+			move = LEFT
 		}
 	}
 	return move
@@ -148,24 +157,20 @@ func (a *AIAlgorithm) getNeighbors(vertex Coordinate) []Coordinate {
 	tmpResult := []Coordinate{
 		{X: max(0, vertex.X-1), Y: vertex.Y},
 		{X: vertex.X, Y: max(0, vertex.Y-1)},
-		{X: min(a.height-1, vertex.X+1), Y: vertex.Y},
-		{X: vertex.X, Y: min(a.width-1, vertex.Y+1)},
+		{X: min(a.width-1, vertex.X+1), Y: vertex.Y},
+		{X: vertex.X, Y: min(a.height-1, vertex.Y+1)},
 	}
 
 	var result []Coordinate
 	for ver := range tmpResult {
-		if tmpResult[ver].X != vertex.X && tmpResult[ver].Y != vertex.Y {
+		x := tmpResult[ver].X
+		y := tmpResult[ver].Y
+		if (x != vertex.X || y != vertex.Y) && (*a.graph)[y][x] != MIN {
 			result = append(result, tmpResult[ver])
 		}
 	}
 
-	for ind, val := range result {
-		if (*a.graph)[val.X][val.Y] == -1 {
-			result = append(result[:ind], result[ind:]...)
-		}
-	}
-
-	return tmpResult
+	return result
 }
 
 func (a *AIAlgorithm) printGrid(arr [][]int) {
