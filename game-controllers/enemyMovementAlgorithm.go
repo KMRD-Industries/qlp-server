@@ -2,18 +2,18 @@ package game_controllers
 
 import (
 	"fmt"
+	"github.com/ungerik/go3d/vec2"
 	"qlp_server/errors"
 )
 
 const (
-	COLLISION = iota - 1
 	UP        = iota
 	DOWN      = iota
 	LEFT      = iota
 	RIGHT     = iota
 	IDLE      = iota
-	MAX       = 100
-	MIN       = -999
+	COLLISION = iota
+	MIN       = 0
 )
 
 type AIAlgorithm struct {
@@ -21,91 +21,83 @@ type AIAlgorithm struct {
 	height     int
 	collisions []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
 	players    []*Player
-	graph      *[][]int
+	graph      *[][]Cell
 }
 
 type Cell struct {
-	direction int
+	direction *vec2.T
 	value     int
-}
-
-func (c *Cell) GetDirection() int {
-	return c.direction
-}
-
-func (c *Cell) GetCellValue() int {
-	return c.value
 }
 
 type Coordinate struct {
 	X, Y int
 }
 
-// TODO porpaw to bo wygląda jak gówno
-func GetPaths(width, height int, collisions []Coordinate, players []*Player) [][]Cell {
+func (c *Cell) GetDirection() vec2.T {
+	return *(c.direction)
+}
+
+func (c *Cell) GetCellValue() int {
+	return c.value
+}
+
+func GetPaths(width, height int, collisions []Coordinate, players []*Player) *[][]Cell {
 	algorithm := AIAlgorithm{}
 	return algorithm.createDistancesMap(width, height, collisions, players)
 }
 
-// TODO dodaj do każdej komórki id gracza
-func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordinate, players []*Player) [][]Cell {
+func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordinate, players []*Player) *[][]Cell {
 	a.width = width
 	a.height = height
 	a.collisions = collisions
 	a.players = players
 
 	a.initGraph()
-	paths, err := a.bfs()
+	err := a.bfs()
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	for _, row := range paths {
-		fmt.Println(row)
+	a.fillDirections()
+	for _, row := range *(a.graph) {
+		for _, el := range row {
+			fmt.Printf("%s, %d ||", el.direction.String(), el.value)
+		}
+		fmt.Print("\n")
 	}
 
-	return paths
+	return a.graph
 }
 
 func (a *AIAlgorithm) initGraph() {
-	graph := make([][]int, a.height)
+	graph := make([][]Cell, a.height)
 	for i := range graph {
-		graph[i] = make([]int, a.width)
+		graph[i] = make([]Cell, a.width)
 	}
 
 	a.graph = &graph
 	a.addPlayers()
 	a.addCollisions()
-
-	//for _, row := range *a.graph {
-	//	fmt.Println(row)
-	//}
 }
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
 		position := player.GetPosition()
-		(*a.graph)[position.Y][position.X] = MAX
+		(*a.graph)[position.Y][position.X] = Cell{&vec2.T{0, 0}, MIN}
 	}
 }
 
 func (a *AIAlgorithm) addCollisions() {
 	for _, coll := range a.collisions {
-		(*a.graph)[coll.Y][coll.X] = MIN
+		(*a.graph)[coll.Y][coll.X] = Cell{&vec2.T{0, 0}, COLLISION}
 	}
 }
 
-func (a *AIAlgorithm) bfs() ([][]Cell, error) {
+func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
-	parent := make([][]Cell, a.height)
-	for i := range parent {
-		parent[i] = make([]Cell, a.width)
-	}
-
 	for _, p := range a.players {
 		player := p.GetPosition()
 		queue.put(player)
-		parent[player.Y][player.X] = Cell{IDLE, MAX}
 	}
 
 	for {
@@ -115,67 +107,60 @@ func (a *AIAlgorithm) bfs() ([][]Cell, error) {
 
 		current, ok := queue.get()
 		if !ok {
-			return nil, errors.EmptyQueue
+			return errors.EmptyQueue
 		}
 
-		for _, next := range a.getNeighbors(current) {
-			found := parent[next.Y][next.X]
-			val := (*a.graph)[next.Y][next.X]
-			if found.direction == 0 && val != IDLE && val != COLLISION {
+		neighbors := a.getNeighbors(current)
+		for _, next := range neighbors {
+			found := (*a.graph)[next.Y][next.X]
+			if found.direction == nil {
 				queue.put(next)
-				distance := parent[current.Y][current.X].value - 1
-				if distance < parent[next.Y][next.X].value {
-					distance = parent[next.Y][next.X].value
+				distance := (*a.graph)[current.Y][current.X].value + 1
+				if distance < (*a.graph)[next.Y][next.X].value {
+					distance = (*a.graph)[next.Y][next.X].value
 				}
-				parent[next.Y][next.X] = Cell{a.parseToMove(current, next), distance}
+				(*a.graph)[next.Y][next.X] = Cell{&vec2.T{0, 0}, distance}
 			}
 		}
 	}
-
-	return parent, nil
+	return nil
 }
 
-func (a *AIAlgorithm) parseToMove(current, next Coordinate) int {
-	move := IDLE
-	if current.X-next.X == 0 {
-		if current.Y > next.Y {
-			move = DOWN
-		} else {
-			move = UP
-		}
-	} else {
-		if current.X > next.X {
-			move = RIGHT
-		} else {
-			move = LEFT
+func (a *AIAlgorithm) fillDirections() {
+	for i := 0; i < a.height; i++ {
+		for j := 0; j < a.width; j++ {
+			value := (*a.graph)[i][j].value
+			if value != MIN && value != COLLISION {
+				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
+			}
 		}
 	}
-	return move
 }
 
-func (a *AIAlgorithm) getNeighbors(vertex Coordinate) []Coordinate {
-	tmpResult := []Coordinate{
-		{X: max(0, vertex.X-1), Y: vertex.Y},
-		{X: vertex.X, Y: max(0, vertex.Y-1)},
-		{X: min(a.width-1, vertex.X+1), Y: vertex.Y},
-		{X: vertex.X, Y: min(a.height-1, vertex.Y+1)},
-	}
+func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
+	neighbors := a.getNeighbors(position)
+	x := (*a.graph)[neighbors[LEFT].Y][neighbors[LEFT].X].value - (*a.graph)[neighbors[RIGHT].Y][neighbors[RIGHT].X].value
+	y := (*a.graph)[neighbors[DOWN].Y][neighbors[DOWN].X].value - (*a.graph)[neighbors[UP].Y][neighbors[UP].X].value
 
-	var result []Coordinate
-	for ver := range tmpResult {
-		x := tmpResult[ver].X
-		y := tmpResult[ver].Y
-		if (x != vertex.X || y != vertex.Y) && (*a.graph)[y][x] != MIN {
-			result = append(result, tmpResult[ver])
-		}
-	}
+	fmt.Println(neighbors)
+	move := vec2.T{float32(x), float32(y)}
+	fmt.Println(position, move)
+	return move.Normalize()
+}
 
-	return result
+func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
+	tmpResult := map[int]Coordinate{
+		UP:    {X: vertex.X, Y: max(0, vertex.Y-1)},
+		LEFT:  {X: max(0, vertex.X-1), Y: vertex.Y},
+		DOWN:  {X: vertex.X, Y: min(a.height-1, vertex.Y+1)},
+		RIGHT: {X: min(a.width-1, vertex.X+1), Y: vertex.Y},
+	}
+	return tmpResult
 }
 
 func (a *AIAlgorithm) printGrid(arr [][]int) {
 	for _, row := range arr {
 		fmt.Println(row)
 	}
-	fmt.Println("\n")
+	fmt.Print("\n")
 }
