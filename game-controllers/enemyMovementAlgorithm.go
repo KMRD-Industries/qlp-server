@@ -3,7 +3,7 @@ package game_controllers
 import (
 	"fmt"
 	"github.com/ungerik/go3d/vec2"
-	"qlp_server/errors"
+	"server/errors"
 )
 
 const (

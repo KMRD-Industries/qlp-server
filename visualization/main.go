@@ -7,7 +7,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"github.com/ungerik/go3d/vec2"
 	"image/color"
-	g "qlp_server/game-controllers"
+	g "server/game-controllers"
 	"strconv"
 )
 
