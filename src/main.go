@@ -45,27 +45,20 @@ func listenTCP() {
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			// inform player of received id
-			msg := &pb.StateUpdate{
+			stateUpdate := &pb.StateUpdate{
 				Id:      id,
 				Variant: pb.StateVariant_CONNECTED,
 			}
-			encoded, _ := proto.Marshal(msg)
-			log.Printf("connected: %d\n", id)
 
-			conn.Write(encoded)
-
+			connectedPlayers := make([]uint32, 0, 8)
 			connections.Lock.Lock()
 			for otherID, c := range connections.TcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
-				// inform new player of those already connected
-				msg.Id = otherID
-				encoded, _ = proto.Marshal(msg)
-				conn.Write(encoded)
+				// collect connected players
+				connectedPlayers = append(connectedPlayers, otherID)
 
 				// inform connected players of new one
-				msg.Id = id
-				encoded, _ = proto.Marshal(msg)
+				encoded, _ := proto.Marshal(stateUpdate)
 				c.Write(encoded)
 			}
 
@@ -73,6 +66,16 @@ func listenTCP() {
 			connections.TcpConns[id] = conn
 			connections.Lock.Unlock()
 
+			// inform player of current game state
+			gameState := &pb.GameState{
+				PlayerId:         id,
+				ConnectedPlayers: connectedPlayers,
+			}
+
+			encoded, _ := proto.Marshal(gameState)
+			log.Printf("connected: %d\n", id)
+
+			conn.Write(encoded)
 		}
 	}
 }
@@ -86,7 +89,7 @@ func handleTCP(ch chan uint32) {
 	}
 
 	for {
-		connections.Lock.Lock()
+		connections.Lock.RLock()
 		for id, conn := range connections.TcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
 			_, err := conn.Read(b)
@@ -106,13 +109,17 @@ func handleTCP(ch chan uint32) {
 
 				ids.ReturnID(id)
 
+				connections.Lock.RUnlock()
+				connections.Lock.Lock()
 				if conn, ok := connections.TcpConns[id]; ok {
 					conn.Close()
 					delete(connections.TcpConns, id)
 				}
+				connections.Lock.Unlock()
+				connections.Lock.RLock()
 			}
 		}
-		connections.Lock.Unlock()
+		connections.Lock.RUnlock()
 	}
 }
 
@@ -146,6 +153,8 @@ func handleUDP(ch chan uint32) {
 
 			err = proto.Unmarshal(b[:n], received)
 
+			log.Printf("%v\n", received)
+
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
 				continue
@@ -153,6 +162,14 @@ func handleUDP(ch chan uint32) {
 
 			senderAddrPort := sender.AddrPort()
 			id := received.EntityId
+
+			// skip packets from disconnected player
+			connections.Lock.RLock()
+			if _, ok := connections.TcpConns[id]; !ok {
+				continue
+			}
+			connections.Lock.RUnlock()
+
 			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
 				addrPorts[id] = senderAddrPort
 			}
