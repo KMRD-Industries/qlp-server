@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
@@ -13,15 +14,21 @@ import (
 )
 
 const (
+	MAX_PLAYERS = 8
 	SERVER_PORT = 9001
 	BUF_SIZE    = 4096
 )
 
 var (
-	ip          = net.ParseIP("127.0.0.1")
-	addrPorts   = make(map[uint32]netip.AddrPort, 32)
-	connections = NewClientPool(32)
-	ids         = NewIDPool()
+	ip        = net.ParseIP("127.0.0.1")
+	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
+	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
+	lock      = sync.RWMutex{}
+	ids       = newIDPool()
+
+	seed = time.Now().Unix()
+
+	gs = NewGameState()
 )
 
 func listenTCP() {
@@ -40,7 +47,7 @@ func listenTCP() {
 
 	for {
 		conn, err := listener.AcceptTCP()
-		id := ids.GetID()
+		id := ids.getID()
 
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
@@ -51,8 +58,8 @@ func listenTCP() {
 			}
 
 			connectedPlayers := make([]uint32, 0, 8)
-			connections.Lock.Lock()
-			for otherID, c := range connections.TcpConns {
+			lock.Lock()
+			for otherID, c := range tcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
 				// collect connected players
 				connectedPlayers = append(connectedPlayers, otherID)
@@ -63,12 +70,13 @@ func listenTCP() {
 			}
 
 			// these will be monitored (we're assuming that closing conn means losing connection)
-			connections.TcpConns[id] = conn
-			connections.Lock.Unlock()
+			tcpConns[id] = conn
+			lock.Unlock()
 
 			// inform player of current game state
 			gameState := &pb.GameState{
 				PlayerId:         id,
+				Seed:             seed,
 				ConnectedPlayers: connectedPlayers,
 			}
 
@@ -80,7 +88,6 @@ func listenTCP() {
 	}
 }
 
-// for now only for sending ids
 func handleTCP(ch chan uint32) {
 	b := make([]byte, BUF_SIZE)
 
@@ -89,17 +96,33 @@ func handleTCP(ch chan uint32) {
 	}
 
 	for {
-		connections.Lock.RLock()
-		for id, conn := range connections.TcpConns {
+		lock.RLock()
+		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			_, err := conn.Read(b)
+			n, err := conn.Read(b)
+
+			if err == nil {
+				err = proto.Unmarshal(b[:n], msg)
+				if err != nil {
+					log.Printf("Failed to deserialize state update: %v\n", err)
+					continue
+				}
+				log.Printf("state update: %v\n", msg)
+
+				for otherID, otherConn := range tcpConns {
+					if id != otherID {
+						otherConn.Write(b[:n])
+					}
+				}
+				continue
+			}
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
 				msg.Id = id
 				msg.Variant = pb.StateVariant_DISCONNECTED
 
-				for otherID, c := range connections.TcpConns {
+				for otherID, c := range tcpConns {
 					if otherID != id {
 						encoded, _ := proto.Marshal(msg)
 						c.Write(encoded)
@@ -107,19 +130,19 @@ func handleTCP(ch chan uint32) {
 				}
 				log.Printf("disconnected %d\n", id)
 
-				ids.ReturnID(id)
+				ids.returnID(id)
 
-				connections.Lock.RUnlock()
-				connections.Lock.Lock()
-				if conn, ok := connections.TcpConns[id]; ok {
+				lock.RUnlock()
+				lock.Lock()
+				if conn, ok := tcpConns[id]; ok {
 					conn.Close()
-					delete(connections.TcpConns, id)
+					delete(tcpConns, id)
 				}
-				connections.Lock.Unlock()
-				connections.Lock.RLock()
+				lock.Unlock()
+				lock.RLock()
 			}
 		}
-		connections.Lock.RUnlock()
+		lock.RUnlock()
 	}
 }
 
@@ -164,11 +187,11 @@ func handleUDP(ch chan uint32) {
 			id := received.EntityId
 
 			// skip packets from disconnected player
-			connections.Lock.RLock()
-			if _, ok := connections.TcpConns[id]; !ok {
+			lock.RLock()
+			if _, ok := tcpConns[id]; !ok {
 				continue
 			}
-			connections.Lock.RUnlock()
+			lock.RUnlock()
 
 			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
 				addrPorts[id] = senderAddrPort
