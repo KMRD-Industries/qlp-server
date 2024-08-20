@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -54,7 +55,6 @@ func listenTCP() {
 			log.Printf("connected: %d\n", id)
 
 			conn.Write(encoded)
-
 			connections.Lock.Lock()
 			for otherID, c := range connections.TcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
@@ -132,6 +132,7 @@ func handleUDP(ch chan uint32) {
 	defer conn.Close()
 
 	for {
+		// co to jest?
 		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		n, sender, err := conn.ReadFromUDP(b)
 
@@ -142,30 +143,66 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			received := &pb.PositionUpdate{}
+			receivedMessage := &pb.WrapperMessage{}
 
-			err = proto.Unmarshal(b[:n], received)
-
+			err := proto.Unmarshal(b[:n], receivedMessage)
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
 				continue
 			}
 
-			senderAddrPort := sender.AddrPort()
-			id := received.EntityId
-			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
-				addrPorts[id] = senderAddrPort
-			}
+			switch receivedMessage.Type {
+			case pb.MessageType_MAP_UPDATE:
+				log.Println("Map update received...")
+			case pb.MessageType_POSITION_UPDATE:
 
-			// pass update to other players
-			for otherID, addrPort := range addrPorts {
-				if otherID != id {
-					udpAddr := net.UDPAddrFromAddrPort(addrPort)
-					conn.WriteToUDP(b[:n], udpAddr)
+				received := &pb.PositionUpdate{}
+				err = proto.Unmarshal(receivedMessage.Payload, received)
+				log.Printf("Position update received from: %d and position: %f, %f\n", received.EntityId, received.X, received.Y)
+
+				if err != nil {
+					log.Printf("Failed to deserialize: %v\n", err)
+					continue
+				}
+
+				senderAddrPort := sender.AddrPort()
+				id := received.EntityId
+				fmt.Println("Before looking for id in addrPort")
+				for val, _ := range addrPorts {
+					fmt.Println(val)
+				}
+				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
+					addrPorts[id] = senderAddrPort
+				}
+
+				// pass update to other players
+				for otherID, addrPort := range addrPorts {
+					if otherID != id {
+						udpAddr := net.UDPAddrFromAddrPort(addrPort)
+						log.Printf("Sending message to: %d\n", otherID)
+						serializedPayload, _ := proto.Marshal(received)
+						message := pb.WrapperMessage{
+							Type:    pb.MessageType_POSITION_UPDATE,
+							Payload: serializedPayload,
+						}
+						serializedMessage, err := proto.Marshal(&message)
+
+						if err != nil {
+							log.Printf("Failed to deserialize: %v\n", err)
+						}
+						_, err = conn.WriteToUDP(serializedMessage, udpAddr)
+						if err != nil {
+							log.Printf("Error while sending a message to %d\n", otherID)
+						}
+					}
 				}
 			}
 		}
 	}
+}
+
+func handleObjectUpdates() {
+
 }
 
 func main() {
