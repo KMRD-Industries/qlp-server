@@ -1,15 +1,7 @@
 github.com/google/go-cmp v0.5.5 h1:Khx7svrCpmxxtHBq5j2mp/xVjsi8hQMfNLvJFAlrGgU=
 github.com/google/go-cmp v0.5.5/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.1 h1:ss/XN302hKXEKF1sYQkX8a4QUWYwF/OCHQB9spwOErw=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.1/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240614231802-f5a5ac1c6e25 h1:YX9aKbEMA6+1q5mGO6ed2ChQayZ+P6wEspqkygchVeQ=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240614231802-f5a5ac1c6e25/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240618133300-c80a690a8529 h1:WewCDFc3c/SEXFNdJddnyNcjXVcxFwbu6J/gtxoLR5I=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240618133300-c80a690a8529/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240717154611-8c54e31dd3df h1:VHKlCQ8fXHfI+4LKADVSx9eNuPVEDPLDCGcc+1p0DrI=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240717154611-8c54e31dd3df/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240721174136-0e99089533ab h1:dgaoOqE9koH83LM1Q22wkyfNfNGZ5N30u4IyuOUBOTc=
-github.com/kmrd-industries/qlp-proto-bindings v0.1.2-0.20240721174136-0e99089533ab/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20240819131318-d0c01f63e62a h1:U9pihE1YO0Tytz2Na7zSApqVryj2OthgEkeZ0LgH8Hg=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20240819131318-d0c01f63e62a/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 h1:E7g+9GITq07hpfrRu66IVDexMakfv52eLZ2CXBWiKr4=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=
 google.golang.org/protobuf v1.33.0 h1:uNO2rsAINq/JlFpSdYEKIZ0uKD/R9cpdv0T+yoGwGmI=
