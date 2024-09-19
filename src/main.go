@@ -27,8 +27,6 @@ var (
 	ids       = newIDPool()
 
 	seed = time.Now().Unix()
-
-	gs = NewGameState()
 )
 
 func listenTCP() {
