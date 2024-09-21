@@ -5,23 +5,23 @@ import (
 	"sync"
 )
 
-type IDPool struct {
+type idPool struct {
 	availableIDs *PriorityQueue
 	nextID       uint32
 	lock         sync.Mutex
 }
 
-func NewIDPool() *IDPool {
+func newIDPool() *idPool {
 	pq := &PriorityQueue{}
 	heap.Init(pq)
-	return &IDPool{
+	return &idPool{
 		availableIDs: pq,
 		nextID:       1,
 		lock:         sync.Mutex{},
 	}
 }
 
-func (p *IDPool) GetID() uint32 {
+func (p *idPool) getID() uint32 {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
@@ -34,7 +34,7 @@ func (p *IDPool) GetID() uint32 {
 	return id
 }
 
-func (p *IDPool) ReturnID(id uint32) {
+func (p *idPool) returnID(id uint32) {
 	p.lock.Lock()
 	heap.Push(p.availableIDs, id)
 	p.lock.Unlock()
