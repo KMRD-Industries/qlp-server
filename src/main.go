@@ -30,6 +30,11 @@ var (
 )
 
 func listenTCP() {
+	stateUpdate := &pb.StateUpdate{
+		Variant: pb.StateVariant_CONNECTED,
+	}
+	prefix := &pb.BytePrefix{}
+
 	addr := net.TCPAddr{
 		IP:   ip,
 		Port: SERVER_PORT,
@@ -50,12 +55,18 @@ func listenTCP() {
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			stateUpdate := &pb.StateUpdate{
-				Id:      id,
-				Variant: pb.StateVariant_CONNECTED,
-			}
+			stateUpdate.Id = id
 
-			connectedPlayers := make([]uint32, 0, 8)
+			// create message with prefix byte length of update
+			// and the update itself
+			bs, _ := proto.Marshal(stateUpdate)
+			prefix.Bytes = uint32(len(bs))
+			bp, _ := proto.Marshal(prefix)
+			encoded := append(bp, bs...)
+
+			log.Printf("%d, %v, %v\n", len(bp), stateUpdate, prefix)
+
+			connectedPlayers := make([]uint32, 0, MAX_PLAYERS)
 			lock.Lock()
 			for otherID, c := range tcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
@@ -63,7 +74,6 @@ func listenTCP() {
 				connectedPlayers = append(connectedPlayers, otherID)
 
 				// inform connected players of new one
-				encoded, _ := proto.Marshal(stateUpdate)
 				c.Write(encoded)
 			}
 
@@ -78,7 +88,7 @@ func listenTCP() {
 				ConnectedPlayers: connectedPlayers,
 			}
 
-			encoded, _ := proto.Marshal(gameState)
+			encoded, _ = proto.Marshal(gameState)
 			log.Printf("connected: %d\n", id)
 
 			conn.Write(encoded)
@@ -87,20 +97,21 @@ func listenTCP() {
 }
 
 func handleTCP(ch chan uint32) {
-	b := make([]byte, BUF_SIZE)
+	bs := make([]byte, BUF_SIZE)
 
 	msg := &pb.StateUpdate{
 		Variant: pb.StateVariant_CONNECTED,
 	}
+	prefix := &pb.BytePrefix{}
 
 	for {
 		lock.RLock()
 		for id, conn := range tcpConns {
-			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			n, err := conn.Read(b)
+			conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			n, err := conn.Read(bs)
 
 			if err == nil {
-				err = proto.Unmarshal(b[:n], msg)
+				err = proto.Unmarshal(bs[:n], msg)
 				if err != nil {
 					log.Printf("Failed to deserialize state update: %v\n", err)
 					continue
@@ -109,7 +120,12 @@ func handleTCP(ch chan uint32) {
 
 				for otherID, otherConn := range tcpConns {
 					if id != otherID {
-						otherConn.Write(b[:n])
+						prefix.Bytes = uint32(n)
+						bp, _ := proto.Marshal(prefix)
+
+						encoded := append(bp, bs[:n]...)
+
+						otherConn.Write(encoded)
 					}
 				}
 				continue
@@ -122,7 +138,12 @@ func handleTCP(ch chan uint32) {
 
 				for otherID, c := range tcpConns {
 					if otherID != id {
-						encoded, _ := proto.Marshal(msg)
+						bs, _ := proto.Marshal(msg)
+						prefix.Bytes = uint32(len(bs))
+						bp, _ := proto.Marshal(prefix)
+
+						encoded := append(bp, bs...)
+
 						c.Write(encoded)
 					}
 				}
