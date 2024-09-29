@@ -64,8 +64,6 @@ func listenTCP() {
 			bp, _ := proto.Marshal(prefix)
 			encoded := append(bp, bs...)
 
-			log.Printf("%d, %v, %v\n", len(bp), stateUpdate, prefix)
-
 			connectedPlayers := make([]uint32, 0, MAX_PLAYERS)
 			lock.Lock()
 			for otherID, c := range tcpConns {
