@@ -10,7 +10,7 @@ func (q *Queue) put(element Coordinate) {
 
 func (q *Queue) get() (Coordinate, bool) {
 	if q.isEmpty() {
-		return Coordinate{0, 0}, false // kolejka jest pusta więc zwracamy false - nie udało się pobrać z kolejki
+		return Coordinate{0, 0, 0, 0}, false // kolejka jest pusta więc zwracamy false - nie udało się pobrać z kolejki
 	}
 	value := q.elements[0]
 	q.elements = q.elements[1:]

@@ -3,32 +3,43 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
-	"log"
-	"net"
-	"net/netip"
-	"time"
-
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
+	"io"
+	"log"
+	"math"
+	"net"
+	"net/netip"
+	g "server/game-controllers"
+	"time"
 )
 
 const (
-	SERVER_PORT = 9001
-	BUF_SIZE    = 4096
+	CONNECTION_PORT = 9001
+	BUF_SIZE        = 4096
 )
+
+// TODO sprawdź czy ma sens rano
+// na początku pokoju przesyłam wygląd całego pokoju
+// potem w update przsyłam tylko to co się zmieniło czyli pewnie tylko pozycje graczy,
+// potem odsyłam graczom i tutaj jest problem bo całe mapy czy pozycje gdzie ma się jaki stwór poruszyć - przekmiń to
 
 var (
-	ip          = net.ParseIP("127.0.0.1")
-	addrPorts   = make(map[uint32]netip.AddrPort, 32)
-	connections = NewClientPool(32)
-	ids         = NewIDPool()
+	connectionUpdateIp = net.ParseIP("127.0.0.1")
+	addrPorts          = make(map[uint32]netip.AddrPort, 32)
+	connections        = NewClientPool(32)
+	ids                = NewIDPool()
+
+	collisions = make([]g.Coordinate, 0)
+	enemies    = make([]*g.Enemy, 0)
+	players    = make([]g.Coordinate, 0)
+	algorithm  = g.NewAIAlgorithm()
 )
 
-func listenTCP() {
+func listenConnectionUpdates() {
 	addr := net.TCPAddr{
-		IP:   ip,
-		Port: SERVER_PORT,
+		IP:   connectionUpdateIp,
+		Port: CONNECTION_PORT,
 	}
 
 	listener, err := net.ListenTCP("tcp", &addr)
@@ -81,45 +92,107 @@ func listenTCP() {
 func handleTCP(ch chan uint32) {
 	b := make([]byte, BUF_SIZE)
 
-	msg := &pb.StateUpdate{
-		Variant: pb.StateVariant_CONNECTED,
-	}
+	//msg := &pb.StateUpdate{
+	//	Variant: pb.StateVariant_CONNECTED,
+	//}
 
 	for {
 		connections.Lock.Lock()
 		for id, conn := range connections.TcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			_, err := conn.Read(b)
+			n, err := conn.Read(b)
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				msg.Id = id
-				msg.Variant = pb.StateVariant_DISCONNECTED
+				handlePlayerDisconnect(id)
+			}
 
-				for otherID, c := range connections.TcpConns {
-					if otherID != id {
-						encoded, _ := proto.Marshal(msg)
-						c.Write(encoded)
-					}
-				}
-				log.Printf("disconnected %d\n", id)
+			var msg pb.StateUpdate
+			if err := proto.Unmarshal(b[:n], &msg); err != nil {
+				log.Printf("Failded to unmarshall message from player %d, error: %v\n", id, err)
+				continue
+			}
 
-				ids.ReturnID(id)
-
-				if conn, ok := connections.TcpConns[id]; ok {
-					conn.Close()
-					delete(connections.TcpConns, id)
-				}
+			switch msg.Variant {
+			case pb.StateVariant_DISCONNECTED:
+				handlePlayerDisconnect(msg.Id)
+			case pb.StateVariant_MAP_UPDATE:
+				log.Printf("Map has been updated by user %d\n", msg.Id)
+				handleMapUpdate(msg.MapPositionsUpdate)
+				continue
 			}
 		}
 		connections.Lock.Unlock()
 	}
 }
 
+// sprawdzć czy działa
+func handlePlayerDisconnect(id uint32) {
+	msg := &pb.StateUpdate{Id: id,
+		Variant: pb.StateVariant_DISCONNECTED}
+
+	for otherID, c := range connections.TcpConns {
+		if otherID != id {
+			encoded, _ := proto.Marshal(msg)
+			c.Write(encoded)
+		}
+	}
+	log.Printf("disconnected %d\n", id)
+
+	ids.ReturnID(id)
+
+	if conn, ok := connections.TcpConns[id]; ok {
+		conn.Close()
+		delete(connections.TcpConns, id)
+	}
+}
+
+func handleMapUpdate(update *pb.MapPositionsUpdate) {
+	var maxHeight uint32 = 0
+	var maxWidth uint32 = 0
+	var minHeight uint32 = math.MaxUint32
+	var minWidth uint32 = math.MaxUint32
+	for _, obstacle := range update.Obstacles {
+		fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
+		collisions = append(collisions, convertToCollision(obstacle))
+		maxHeight = max(maxHeight, obstacle.Top)
+		maxWidth = max(maxWidth, obstacle.Left)
+		minHeight = min(minHeight, obstacle.Top)
+		minWidth = min(minWidth, obstacle.Left)
+	}
+	fmt.Printf("length of the collision table: %d\n", len(collisions))
+
+	algorithm.GetEnemiesUpdate(
+		int(maxWidth-minWidth),
+		int(maxHeight-minHeight),
+		collisions,
+		players,
+		enemies,
+	)
+
+	//algorithm.SetHeight(int(maxHeight - minHeight))
+	//algorithm.SetWidth(int(maxWidth - minWidth))
+	//algorithm.SetCollisions(collisions)
+	//algorithm.SetHeightOffset(int(minHeight))
+	//algorithm.SetWidthOffset(int(minWidth))
+	//players := make([]*game_controllers.Player, 0)
+
+	//algorithm.CreateDistancesMap(int(maxWidth-minWidth), int(maxHeight-minHeight), collisions, players)
+}
+
+func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
+	return g.Coordinate{
+		X:      int(obstacle.Left),
+		Y:      int(obstacle.Top),
+		Height: int(obstacle.Height),
+		Width:  int(obstacle.Width),
+	}
+}
+
 func handleUDP(ch chan uint32) {
 	addr := net.UDPAddr{
-		Port: SERVER_PORT,
-		IP:   ip,
+		Port: CONNECTION_PORT,
+		IP:   connectionUpdateIp,
 	}
 	b := make([]byte, BUF_SIZE)
 
@@ -143,7 +216,7 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			receivedMessage := &pb.WrapperMessage{}
+			receivedMessage := &pb.StateUpdate{}
 
 			err := proto.Unmarshal(b[:n], receivedMessage)
 			if err != nil {
@@ -151,14 +224,13 @@ func handleUDP(ch chan uint32) {
 				continue
 			}
 
-			switch receivedMessage.Type {
-			case pb.MessageType_MAP_UPDATE:
-				log.Println("Map update received...")
-			case pb.MessageType_POSITION_UPDATE:
-
-				received := &pb.PositionUpdate{}
-				err = proto.Unmarshal(receivedMessage.Payload, received)
-				log.Printf("Position update received from: %d and position: %f, %f\n", received.EntityId, received.X, received.Y)
+			switch receivedMessage.Variant {
+			case pb.StateVariant_MAP_UPDATE:
+				//log.Println("Map update received...")
+				continue
+			case pb.StateVariant_PLAYER_POSITION_UPDATE:
+				positionUpdate := receivedMessage.PositionUpdate
+				log.Printf("Position update received from: %d and position: %f, %f\n", positionUpdate.EntityId, positionUpdate.X, positionUpdate.Y)
 
 				if err != nil {
 					log.Printf("Failed to deserialize: %v\n", err)
@@ -166,11 +238,11 @@ func handleUDP(ch chan uint32) {
 				}
 
 				senderAddrPort := sender.AddrPort()
-				id := received.EntityId
-				fmt.Println("Before looking for id in addrPort")
-				for val, _ := range addrPorts {
-					fmt.Println(val)
-				}
+				id := positionUpdate.EntityId
+				//fmt.Println("Before looking for id in addrPort")
+				//for val, _ := range addrPorts {
+				//	fmt.Println(val)
+				//}
 				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
 					addrPorts[id] = senderAddrPort
 				}
@@ -180,17 +252,16 @@ func handleUDP(ch chan uint32) {
 					if otherID != id {
 						udpAddr := net.UDPAddrFromAddrPort(addrPort)
 						log.Printf("Sending message to: %d\n", otherID)
-						serializedPayload, _ := proto.Marshal(received)
-						message := pb.WrapperMessage{
-							Type:    pb.MessageType_POSITION_UPDATE,
-							Payload: serializedPayload,
+						msg := &pb.StateUpdate{
+							Variant:        pb.StateVariant_PLAYER_POSITION_UPDATE,
+							PositionUpdate: positionUpdate,
 						}
-						serializedMessage, err := proto.Marshal(&message)
+						serializedMsg, err := proto.Marshal(msg)
 
 						if err != nil {
 							log.Printf("Failed to deserialize: %v\n", err)
 						}
-						_, err = conn.WriteToUDP(serializedMessage, udpAddr)
+						_, err = conn.WriteToUDP(serializedMsg, udpAddr)
 						if err != nil {
 							log.Printf("Error while sending a message to %d\n", otherID)
 						}
@@ -201,14 +272,10 @@ func handleUDP(ch chan uint32) {
 	}
 }
 
-func handleObjectUpdates() {
-
-}
-
 func main() {
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
-	go listenTCP()
+	go listenConnectionUpdates()
 	go handleTCP(ch)
 
 	for {

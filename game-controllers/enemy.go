@@ -1,17 +1,18 @@
 package game_controllers
 
-import "image/color"
+import "github.com/ungerik/go3d/vec2"
 
 type Enemy struct {
-	position Coordinate
-	moves    []int
-	color    color.RGBA
+	id        uint32
+	position  Coordinate
+	direction vec2.T
 }
 
-func NewEnemy(x, y int, rgba color.RGBA) *Enemy {
+func NewEnemy(id uint32, x, y int) *Enemy {
 	return &Enemy{
-		position: Coordinate{X: x, Y: y},
-		color:    rgba,
+		id:        id,
+		position:  Coordinate{X: x, Y: y},
+		direction: vec2.T{0, 0},
 	}
 }
 
@@ -19,18 +20,26 @@ func (e *Enemy) GetPosition() Coordinate {
 	return e.position
 }
 
-func (e *Enemy) SetMoves(move []int) {
-	e.moves = move
-}
-
-func (e *Enemy) GetMoves() []int {
-	return e.moves
-}
-
-func (e *Enemy) GetColor() color.RGBA {
-	return e.color
-}
-
 func (e *Enemy) SetPosition(newX, newY int) {
-	e.position = Coordinate{newX, newY}
+	e.position = Coordinate{newX, newY, 0, 0}
+}
+
+func (e *Enemy) GetId() uint32 {
+	return e.id
+}
+
+func (e *Enemy) GetDirection() vec2.T {
+	return e.direction
+}
+
+func (e *Enemy) GetX() float32 {
+	return e.direction.Get(1, 0)
+}
+
+func (e *Enemy) GetY() float32 {
+	return e.direction.Get(0, 1)
+}
+
+func (e *Enemy) SetDirection(direction vec2.T) {
+	e.direction = direction
 }

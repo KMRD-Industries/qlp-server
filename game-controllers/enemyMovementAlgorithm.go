@@ -6,21 +6,22 @@ import (
 	"server/errors"
 )
 
-const (
-	UP        = iota
-	DOWN      = iota
-	LEFT      = iota
-	RIGHT     = iota
-	IDLE      = iota
-	COLLISION = iota
-	MIN       = 0
+var (
+	UP        int
+	DOWN      int
+	LEFT      int
+	RIGHT     int
+	IDLE      int
+	COLLISION int
+	MIN       int
 )
 
 type AIAlgorithm struct {
 	width      int
 	height     int
 	collisions []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
-	players    []*Player
+	players    []Coordinate
+	enemies    []*Enemy
 	graph      *[][]Cell
 }
 
@@ -30,7 +31,7 @@ type Cell struct {
 }
 
 type Coordinate struct {
-	X, Y int
+	X, Y, Height, Width int
 }
 
 func (c *Cell) GetDirection() vec2.T {
@@ -41,17 +42,35 @@ func (c *Cell) GetCellValue() int {
 	return c.value
 }
 
-func GetPaths(width, height int, collisions []Coordinate, players []*Player) *[][]Cell {
-	algorithm := AIAlgorithm{}
-	return algorithm.createDistancesMap(width, height, collisions, players)
+func (a *AIAlgorithm) GetEnemiesUpdate(width, height int, collisions, players []Coordinate, enemies []*Enemy) {
+	a.createDistancesMap(width, height, collisions, players, enemies)
 }
 
-func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordinate, players []*Player) *[][]Cell {
+func NewAIAlgorithm() *AIAlgorithm {
+	return &AIAlgorithm{}
+}
+
+func (a *AIAlgorithm) initDirections() {
+	MIN = 0
+	UP = a.width + a.height + 1
+	DOWN = UP + 1
+	LEFT = DOWN + 1
+	RIGHT = LEFT + 1
+	IDLE = RIGHT + 1
+	COLLISION = IDLE + 1
+}
+
+func (a *AIAlgorithm) initAlgorithm(width, height int, collisions, players []Coordinate, enemies []*Enemy) {
 	a.width = width
 	a.height = height
 	a.collisions = collisions
 	a.players = players
+	a.enemies = enemies
+}
 
+func (a *AIAlgorithm) createDistancesMap(width, height int, collisions, players []Coordinate, enemies []*Enemy) {
+	a.initAlgorithm(width, height, collisions, players, enemies)
+	a.initDirections()
 	a.initGraph()
 	err := a.bfs()
 	if err != nil {
@@ -59,14 +78,12 @@ func (a *AIAlgorithm) createDistancesMap(width, height int, collisions []Coordin
 	}
 
 	a.fillDirections()
-	for _, row := range *(a.graph) {
-		for _, el := range row {
-			fmt.Printf("%s, %d ||", el.direction.String(), el.value)
-		}
-		fmt.Print("\n")
-	}
-
-	return a.graph
+	//for _, row := range *(a.graph) {
+	//	for _, el := range row {
+	//		fmt.Printf("%10f, %10f, %2d ||", el.direction.Get(1, 0), el.direction.Get(0, 1), el.value)
+	//	}
+	//	fmt.Print("\n")
+	//}
 }
 
 func (a *AIAlgorithm) initGraph() {
@@ -82,8 +99,7 @@ func (a *AIAlgorithm) initGraph() {
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
-		position := player.GetPosition()
-		(*a.graph)[position.Y][position.X] = Cell{&vec2.T{0, 0}, MIN}
+		(*a.graph)[player.Y][player.X] = Cell{&vec2.T{0, 0}, MIN}
 	}
 }
 
@@ -95,8 +111,7 @@ func (a *AIAlgorithm) addCollisions() {
 
 func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
-	for _, p := range a.players {
-		player := p.GetPosition()
+	for _, player := range a.players {
 		queue.put(player)
 	}
 
@@ -127,27 +142,25 @@ func (a *AIAlgorithm) bfs() error {
 }
 
 func (a *AIAlgorithm) fillDirections() {
-	for i := 0; i < a.height; i++ {
-		for j := 0; j < a.width; j++ {
-			value := (*a.graph)[i][j].value
-			if value != MIN && value != COLLISION {
-				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
-			}
-		}
+	for _, enemy := range a.enemies {
+		position := enemy.GetPosition()
+		parsedPosition := a.parseToMove(position)
+		enemy.SetDirection(parsedPosition)
+		(*a.graph)[position.X][position.Y].direction = &parsedPosition
 	}
+
 }
 
-func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
+func (a *AIAlgorithm) parseToMove(position Coordinate) vec2.T {
 	neighbors := a.getNeighbors(position)
 	x := (*a.graph)[neighbors[LEFT].Y][neighbors[LEFT].X].value - (*a.graph)[neighbors[RIGHT].Y][neighbors[RIGHT].X].value
 	y := (*a.graph)[neighbors[DOWN].Y][neighbors[DOWN].X].value - (*a.graph)[neighbors[UP].Y][neighbors[UP].X].value
 
-	fmt.Println(neighbors)
 	move := vec2.T{float32(x), float32(y)}
-	fmt.Println(position, move)
-	return move.Normalize()
+	return *move.Normalize()
 }
 
+// TODO coś tu nie gra - naprwa
 func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
 	tmpResult := map[int]Coordinate{
 		UP:    {X: vertex.X, Y: max(0, vertex.Y-1)},
