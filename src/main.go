@@ -2,21 +2,21 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
-	"math"
 	"net"
 	"net/netip"
 	g "server/game-controllers"
+	"sync"
 	"time"
 )
 
 const (
-	CONNECTION_PORT = 9001
-	BUF_SIZE        = 4096
+	MAX_PLAYERS = 8
+	SERVER_PORT = 9001
+	BUF_SIZE    = 4096
 )
 
 // TODO sprawdź czy ma sens rano
@@ -25,10 +25,13 @@ const (
 // potem odsyłam graczom i tutaj jest problem bo całe mapy czy pozycje gdzie ma się jaki stwór poruszyć - przekmiń to
 
 var (
-	connectionUpdateIp = net.ParseIP("127.0.0.1")
-	addrPorts          = make(map[uint32]netip.AddrPort, 32)
-	connections        = NewClientPool(32)
-	ids                = NewIDPool()
+	ip        = net.ParseIP("127.0.0.1")
+	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
+	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
+	lock      = sync.RWMutex{}
+	ids       = newIDPool()
+
+	seed = time.Now().Unix()
 
 	collisions = make([]g.Coordinate, 0)
 	enemies    = make([]*g.Enemy, 0)
@@ -38,8 +41,8 @@ var (
 
 func listenConnectionUpdates() {
 	addr := net.TCPAddr{
-		IP:   connectionUpdateIp,
-		Port: CONNECTION_PORT,
+		IP:   ip,
+		Port: SERVER_PORT,
 	}
 
 	listener, err := net.ListenTCP("tcp", &addr)
@@ -52,148 +55,109 @@ func listenConnectionUpdates() {
 
 	for {
 		conn, err := listener.AcceptTCP()
-		id := ids.GetID()
+		id := ids.getID()
 
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			// inform player of received id
-			msg := &pb.StateUpdate{
+			stateUpdate := &pb.StateUpdate{
 				Id:      id,
 				Variant: pb.StateVariant_CONNECTED,
 			}
-			encoded, _ := proto.Marshal(msg)
-			log.Printf("connected: %d\n", id)
 
-			conn.Write(encoded)
-			connections.Lock.Lock()
-			for otherID, c := range connections.TcpConns {
+			connectedPlayers := make([]uint32, 0, 8)
+			lock.Lock()
+			for otherID, c := range tcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
-				// inform new player of those already connected
-				msg.Id = otherID
-				encoded, _ = proto.Marshal(msg)
-				conn.Write(encoded)
+				// collect connected players
+				connectedPlayers = append(connectedPlayers, otherID)
 
 				// inform connected players of new one
-				msg.Id = id
-				encoded, _ = proto.Marshal(msg)
+				encoded, _ := proto.Marshal(stateUpdate)
 				c.Write(encoded)
 			}
 
 			// these will be monitored (we're assuming that closing conn means losing connection)
-			connections.TcpConns[id] = conn
-			connections.Lock.Unlock()
+			tcpConns[id] = conn
+			lock.Unlock()
 
+			// inform player of current game state
+			gameState := &pb.GameState{
+				PlayerId:         id,
+				Seed:             seed,
+				ConnectedPlayers: connectedPlayers,
+			}
+
+			encoded, _ := proto.Marshal(gameState)
+			log.Printf("connected: %d\n", id)
+
+			conn.Write(encoded)
 		}
 	}
 }
 
-// for now only for sending ids
 func handleTCP(ch chan uint32) {
 	b := make([]byte, BUF_SIZE)
 
-	//msg := &pb.StateUpdate{
-	//	Variant: pb.StateVariant_CONNECTED,
-	//}
+	msg := &pb.StateUpdate{
+		Variant: pb.StateVariant_CONNECTED,
+	}
 
 	for {
-		connections.Lock.Lock()
-		for id, conn := range connections.TcpConns {
+		lock.RLock()
+		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
 			n, err := conn.Read(b)
 
+			if err == nil {
+				err = proto.Unmarshal(b[:n], msg)
+				if err != nil {
+					log.Printf("Failed to deserialize state update: %v\n", err)
+					continue
+				}
+				log.Printf("state update: %v\n", msg)
+
+				for otherID, otherConn := range tcpConns {
+					if id != otherID {
+						otherConn.Write(b[:n])
+					}
+				}
+				continue
+			}
+
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				handlePlayerDisconnect(id)
-			}
+				msg.Id = id
+				msg.Variant = pb.StateVariant_DISCONNECTED
 
-			var msg pb.StateUpdate
-			if err := proto.Unmarshal(b[:n], &msg); err != nil {
-				log.Printf("Failded to unmarshall message from player %d, error: %v\n", id, err)
-				continue
-			}
+				for otherID, c := range tcpConns {
+					if otherID != id {
+						encoded, _ := proto.Marshal(msg)
+						c.Write(encoded)
+					}
+				}
+				log.Printf("disconnected %d\n", id)
 
-			switch msg.Variant {
-			case pb.StateVariant_DISCONNECTED:
-				handlePlayerDisconnect(msg.Id)
-			case pb.StateVariant_MAP_UPDATE:
-				log.Printf("Map has been updated by user %d\n", msg.Id)
-				handleMapUpdate(msg.MapPositionsUpdate)
-				continue
+				ids.returnID(id)
+
+				lock.RUnlock()
+				lock.Lock()
+				if conn, ok := tcpConns[id]; ok {
+					conn.Close()
+					delete(tcpConns, id)
+				}
+				lock.Unlock()
+				lock.RLock()
 			}
 		}
-		connections.Lock.Unlock()
-	}
-}
-
-// sprawdzć czy działa
-func handlePlayerDisconnect(id uint32) {
-	msg := &pb.StateUpdate{Id: id,
-		Variant: pb.StateVariant_DISCONNECTED}
-
-	for otherID, c := range connections.TcpConns {
-		if otherID != id {
-			encoded, _ := proto.Marshal(msg)
-			c.Write(encoded)
-		}
-	}
-	log.Printf("disconnected %d\n", id)
-
-	ids.ReturnID(id)
-
-	if conn, ok := connections.TcpConns[id]; ok {
-		conn.Close()
-		delete(connections.TcpConns, id)
-	}
-}
-
-func handleMapUpdate(update *pb.MapPositionsUpdate) {
-	var maxHeight uint32 = 0
-	var maxWidth uint32 = 0
-	var minHeight uint32 = math.MaxUint32
-	var minWidth uint32 = math.MaxUint32
-	for _, obstacle := range update.Obstacles {
-		fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
-		collisions = append(collisions, convertToCollision(obstacle))
-		maxHeight = max(maxHeight, obstacle.Top)
-		maxWidth = max(maxWidth, obstacle.Left)
-		minHeight = min(minHeight, obstacle.Top)
-		minWidth = min(minWidth, obstacle.Left)
-	}
-	fmt.Printf("length of the collision table: %d\n", len(collisions))
-
-	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
-	//algorithm.GetEnemiesUpdate(
-	//	int(maxWidth-minWidth),
-	//	int(maxHeight-minHeight),
-	//	collisions,
-	//	players,
-	//	enemies,
-	//)
-
-	//algorithm.SetHeight(int(maxHeight - minHeight))
-	//algorithm.SetWidth(int(maxWidth - minWidth))
-	//algorithm.SetCollisions(collisions)
-	//algorithm.SetHeightOffset(int(minHeight))
-	//algorithm.SetWidthOffset(int(minWidth))
-	//players := make([]*game_controllers.Player, 0)
-
-	//algorithm.CreateDistancesMap(int(maxWidth-minWidth), int(maxHeight-minHeight), collisions, players)
-}
-
-func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
-	return g.Coordinate{
-		X:      int(obstacle.Left),
-		Y:      int(obstacle.Top),
-		Height: int(obstacle.Height),
-		Width:  int(obstacle.Width),
+		lock.RUnlock()
 	}
 }
 
 func handleUDP(ch chan uint32) {
 	addr := net.UDPAddr{
-		Port: CONNECTION_PORT,
-		IP:   connectionUpdateIp,
+		Port: SERVER_PORT,
+		IP:   ip,
 	}
 	b := make([]byte, BUF_SIZE)
 
@@ -206,7 +170,6 @@ func handleUDP(ch chan uint32) {
 	defer conn.Close()
 
 	for {
-		// co to jest?
 		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		n, sender, err := conn.ReadFromUDP(b)
 
@@ -217,56 +180,36 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			receivedMessage := &pb.StateUpdate{}
+			received := &pb.PositionUpdate{}
 
-			err := proto.Unmarshal(b[:n], receivedMessage)
+			err = proto.Unmarshal(b[:n], received)
+
+			log.Printf("%v\n", received)
+
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
 				continue
 			}
 
-			switch receivedMessage.Variant {
-			case pb.StateVariant_MAP_UPDATE:
-				//log.Println("Map update received...")
+			senderAddrPort := sender.AddrPort()
+			id := received.EntityId
+
+			// skip packets from disconnected player
+			lock.RLock()
+			if _, ok := tcpConns[id]; !ok {
 				continue
-			case pb.StateVariant_PLAYER_POSITION_UPDATE:
-				positionUpdate := receivedMessage.PositionUpdate
-				log.Printf("Position update received from: %d and position: %f, %f\n", positionUpdate.EntityId, positionUpdate.X, positionUpdate.Y)
+			}
+			lock.RUnlock()
 
-				if err != nil {
-					log.Printf("Failed to deserialize: %v\n", err)
-					continue
-				}
+			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
+				addrPorts[id] = senderAddrPort
+			}
 
-				senderAddrPort := sender.AddrPort()
-				id := positionUpdate.EntityId
-				//fmt.Println("Before looking for id in addrPort")
-				//for val, _ := range addrPorts {
-				//	fmt.Println(val)
-				//}
-				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
-					addrPorts[id] = senderAddrPort
-				}
-
-				// pass update to other players
-				for otherID, addrPort := range addrPorts {
-					if otherID != id {
-						udpAddr := net.UDPAddrFromAddrPort(addrPort)
-						log.Printf("Sending message to: %d\n", otherID)
-						msg := &pb.StateUpdate{
-							Variant:        pb.StateVariant_PLAYER_POSITION_UPDATE,
-							PositionUpdate: positionUpdate,
-						}
-						serializedMsg, err := proto.Marshal(msg)
-
-						if err != nil {
-							log.Printf("Failed to deserialize: %v\n", err)
-						}
-						_, err = conn.WriteToUDP(serializedMsg, udpAddr)
-						if err != nil {
-							log.Printf("Error while sending a message to %d\n", otherID)
-						}
-					}
+			// pass update to other players
+			for otherID, addrPort := range addrPorts {
+				if otherID != id {
+					udpAddr := net.UDPAddrFromAddrPort(addrPort)
+					conn.WriteToUDP(b[:n], udpAddr)
 				}
 			}
 		}

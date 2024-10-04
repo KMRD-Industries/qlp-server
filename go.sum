@@ -1,7 +1,5 @@
 github.com/google/go-cmp v0.5.6 h1:BKbKCqvP6I+rmFHt06ZmyQtvB8xAkWdhFyr0ZUNZcxQ=
 github.com/google/go-cmp v0.5.6/go.mod h1:v8dTdLbMG2kIc/vJvl+f65V22dbkXbowE6jgT/gNBxE=
-github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20240922124520-e0496a740df4 h1:ikB5XGJqGG5f2cs0P0rFZyiDEb2TuJm4Ekunfs9JY7w=
-github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20240922124520-e0496a740df4/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
 github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241004124427-dafffe97404a h1:0E/0tGj6jEUbPjwMmQvBv7MkqLN6PjpeiUJN454fCuE=
 github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241004124427-dafffe97404a/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
 github.com/ungerik/go3d v0.0.0-20240502073936-1137f6adf7e9 h1:wMWP16Ijw+W+IXGcAzrwQDua1NBB4tP8iWECpg5DVRQ=
