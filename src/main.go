@@ -162,13 +162,14 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	}
 	fmt.Printf("length of the collision table: %d\n", len(collisions))
 
-	algorithm.GetEnemiesUpdate(
-		int(maxWidth-minWidth),
-		int(maxHeight-minHeight),
-		collisions,
-		players,
-		enemies,
-	)
+	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
+	//algorithm.GetEnemiesUpdate(
+	//	int(maxWidth-minWidth),
+	//	int(maxHeight-minHeight),
+	//	collisions,
+	//	players,
+	//	enemies,
+	//)
 
 	//algorithm.SetHeight(int(maxHeight - minHeight))
 	//algorithm.SetWidth(int(maxWidth - minWidth))

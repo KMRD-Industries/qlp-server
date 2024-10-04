@@ -3,8 +3,7 @@ module server
 go 1.22.1
 
 require (
-	fyne.io/fyne/v2 v2.4.5
-	github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20240922124520-e0496a740df4
+	github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241004124427-dafffe97404a
 	github.com/ungerik/go3d v0.0.0-20240502073936-1137f6adf7e9
 	google.golang.org/protobuf v1.34.2
 )
