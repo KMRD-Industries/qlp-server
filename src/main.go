@@ -15,7 +15,7 @@ import (
 
 const (
 	MAX_PLAYERS = 8
-	SERVER_PORT = 9001
+	SERVER_PORT = 10823
 	BUF_SIZE    = 4096
 )
 
@@ -189,7 +189,7 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			received := &pb.PositionUpdate{}
+			received := &pb.MovementUpdate{}
 
 			err = proto.Unmarshal(b[:n], received)
 
