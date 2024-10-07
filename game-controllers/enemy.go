@@ -32,11 +32,11 @@ func (e *Enemy) GetDirection() vec2.T {
 	return e.direction
 }
 
-func (e *Enemy) GetX() float32 {
+func (e *Enemy) GetDirectionX() float32 {
 	return e.direction.Get(1, 0)
 }
 
-func (e *Enemy) GetY() float32 {
+func (e *Enemy) GetDirectionY() float32 {
 	return e.direction.Get(0, 1)
 }
 

@@ -2,10 +2,12 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/netip"
 	g "server/game-controllers"
@@ -34,7 +36,7 @@ var (
 	seed = time.Now().Unix()
 
 	collisions = make([]g.Coordinate, 0)
-	enemies    = make([]*g.Enemy, 0)
+	enemies    = make(map[uint32]*g.Enemy, 0)
 	players    = make([]g.Coordinate, 0)
 	algorithm  = g.NewAIAlgorithm()
 )
@@ -68,7 +70,7 @@ func listenConnectionUpdates() {
 			connectedPlayers := make([]uint32, 0, 8)
 			lock.Lock()
 			for otherID, c := range tcpConns {
-				log.Printf("comm: %d %d\n", id, otherID)
+				//log.Printf("comm: %d %d\n", id, otherID)
 				// collect connected players
 				connectedPlayers = append(connectedPlayers, otherID)
 
@@ -99,10 +101,6 @@ func listenConnectionUpdates() {
 func handleTCP(ch chan uint32) {
 	b := make([]byte, BUF_SIZE)
 
-	msg := &pb.StateUpdate{
-		Variant: pb.StateVariant_CONNECTED,
-	}
-
 	for {
 		lock.RLock()
 		for id, conn := range tcpConns {
@@ -110,16 +108,53 @@ func handleTCP(ch chan uint32) {
 			n, err := conn.Read(b)
 
 			if err == nil {
-				err = proto.Unmarshal(b[:n], msg)
+				var msg pb.StateUpdate
+				err = proto.Unmarshal(b[:n], &msg)
 				if err != nil {
 					log.Printf("Failed to deserialize state update: %v\n", err)
 					continue
 				}
-				log.Printf("state update: %v\n", msg)
+				//log.Printf("state update: %v\n", &msg)
 
-				for otherID, otherConn := range tcpConns {
-					if id != otherID {
-						otherConn.Write(b[:n])
+				switch msg.Variant {
+				case pb.StateVariant_DISCONNECTED:
+					for otherID, otherConn := range tcpConns {
+						if id != otherID {
+							otherConn.Write(b[:n])
+						}
+					}
+				case pb.StateVariant_MAP_UPDATE:
+					log.Printf("Map has been updated by user %d\n", msg.Id)
+					handleMapUpdate(msg.MapPositionsUpdate)
+					// TODO jak tutaj przesyłam tą samą wiadomość na resztę połączeń to mi wybucha gra
+					// sprawdź to albo nie rób tak
+					enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
+					for _, enemy := range enemies {
+						enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
+					}
+
+					enemyPositionsUpdate := &pb.EnemyPositionsUpdate{
+						EnemyPositions: enemiesToSend,
+					}
+					responseMsg := &pb.StateUpdate{
+						Id:                   msg.Id,
+						Variant:              pb.StateVariant_MAP_UPDATE,
+						EnemyPositionsUpdate: enemyPositionsUpdate,
+					}
+					for _, conn := range tcpConns {
+						serializedMsg, err := proto.Marshal(responseMsg)
+						if err != nil {
+							log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
+						}
+						conn.Write(serializedMsg)
+					}
+					continue
+				case pb.StateVariant_ROOM_CHANGED:
+					log.Println("Room changed.............")
+					for otherID, otherConn := range tcpConns {
+						if id != otherID {
+							otherConn.Write(b[:n])
+						}
 					}
 				}
 				continue
@@ -127,30 +162,104 @@ func handleTCP(ch chan uint32) {
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				msg.Id = id
-				msg.Variant = pb.StateVariant_DISCONNECTED
-
-				for otherID, c := range tcpConns {
-					if otherID != id {
-						encoded, _ := proto.Marshal(msg)
-						c.Write(encoded)
-					}
-				}
-				log.Printf("disconnected %d\n", id)
-
-				ids.returnID(id)
-
-				lock.RUnlock()
-				lock.Lock()
-				if conn, ok := tcpConns[id]; ok {
-					conn.Close()
-					delete(tcpConns, id)
-				}
-				lock.Unlock()
-				lock.RLock()
+				handlePlayerDisconnect(id)
 			}
 		}
 		lock.RUnlock()
+	}
+}
+
+func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
+	return &pb.Enemy{
+		Id: enemy.GetId(),
+		X:  enemy.GetDirectionX(),
+		Y:  enemy.GetDirectionY(),
+	}
+}
+
+func handlePlayerDisconnect(id uint32) {
+	msg := &pb.StateUpdate{Id: id,
+		Variant: pb.StateVariant_DISCONNECTED}
+
+	for otherID, c := range tcpConns {
+		if otherID != id {
+			encoded, _ := proto.Marshal(msg)
+			c.Write(encoded)
+		}
+	}
+	log.Printf("disconnected %d\n", id)
+
+	ids.returnID(id)
+
+	lock.RUnlock()
+	lock.Lock()
+	if conn, ok := tcpConns[id]; ok {
+		conn.Close()
+		delete(tcpConns, id)
+	}
+	lock.Unlock()
+	lock.RLock()
+}
+
+func handleMapUpdate(update *pb.MapPositionsUpdate) {
+	var maxHeight int32 = 0
+	var maxWidth int32 = 0
+	var minHeight int32 = math.MaxInt32
+	var minWidth int32 = math.MaxInt32
+	//fmt.Println("Obstacles: ")
+	for _, obstacle := range update.Obstacles {
+		//fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
+		collisions = append(collisions, convertToCollision(obstacle))
+		maxHeight = max(maxHeight, obstacle.Top)
+		maxWidth = max(maxWidth, obstacle.Left)
+		minHeight = min(minHeight, obstacle.Top)
+		minWidth = min(minWidth, obstacle.Left)
+	}
+
+	//fmt.Println("Players: ")
+	fmt.Println(update.Players)
+	for _, player := range update.Players {
+		fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
+		players = append(players, g.Coordinate{
+			X:      int(player.X),
+			Y:      int(player.Y),
+			Height: 0,
+			Width:  0,
+		})
+	}
+
+	//fmt.Println("Enemies: ")
+	for _, enemy := range update.Enemies {
+		//fmt.Printf("Enemy: x %d, y %d\n", enemy.GetDirectionX(), enemy.GetDirectionY())
+		enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()), int(enemy.GetY()))
+	}
+	fmt.Printf("length of the collision table: %d\n", len(collisions))
+
+	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
+
+	start := time.Now()
+	algorithm.GetEnemiesUpdate(
+		int(maxWidth-minWidth)+1,
+		int(maxHeight-minHeight)+1,
+		int(minWidth),
+		int(minHeight),
+		collisions,
+		players,
+		enemies,
+	)
+	collisions = collisions[:0]
+	players = players[:0]
+	elapsed := time.Since(start)
+	log.Printf("Finished after: %s\n", elapsed)
+
+}
+
+func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
+	return g.Coordinate{
+		X:      int(obstacle.Left),
+		Y:      int(obstacle.Top),
+		Height: int(obstacle.Height),
+		Width:  int(obstacle.Width),
 	}
 }
 
@@ -184,7 +293,7 @@ func handleUDP(ch chan uint32) {
 
 			err = proto.Unmarshal(b[:n], received)
 
-			log.Printf("%v\n", received)
+			//log.Printf("%v\n", received)
 
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
