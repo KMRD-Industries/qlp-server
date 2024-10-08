@@ -36,8 +36,8 @@ var (
 	seed = time.Now().Unix()
 
 	collisions = make([]g.Coordinate, 0)
-	enemies    = make(map[uint32]*g.Enemy, 0)
-	players    = make([]g.Coordinate, 0)
+	enemies    = make(map[uint32]*g.Enemy)
+	players    = make(map[uint32]g.Coordinate)
 	algorithm  = g.NewAIAlgorithm()
 )
 
@@ -124,6 +124,7 @@ func handleTCP(ch chan uint32) {
 						}
 					}
 				case pb.StateVariant_MAP_UPDATE:
+
 					log.Printf("Map has been updated by user %d\n", msg.Id)
 					handleMapUpdate(msg.MapPositionsUpdate)
 					// TODO jak tutaj przesyłam tą samą wiadomość na resztę połączeń to mi wybucha gra
@@ -149,8 +150,10 @@ func handleTCP(ch chan uint32) {
 						conn.Write(serializedMsg)
 					}
 					continue
+				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
+					log.Println("MAP DIMENSIONS HAS BEEN SET...")
+					handleMapDimensionUpdate(msg.MapDimensionsUpdate)
 				case pb.StateVariant_ROOM_CHANGED:
-					log.Println("Room changed.............")
 					for otherID, otherConn := range tcpConns {
 						if id != otherID {
 							otherConn.Write(b[:n])
@@ -167,6 +170,31 @@ func handleTCP(ch chan uint32) {
 		}
 		lock.RUnlock()
 	}
+}
+
+func handleMapDimensionUpdate(update *pb.MapDimensionsUpdate) {
+	var maxHeight int32 = 0
+	var maxWidth int32 = 0
+	var minHeight int32 = math.MaxInt32
+	var minWidth int32 = math.MaxInt32
+	//fmt.Println("Obstacles: ")
+	for _, obstacle := range update.Obstacles {
+		//fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
+		collisions = append(collisions, convertToCollision(obstacle))
+		maxHeight = max(maxHeight, obstacle.Top)
+		maxWidth = max(maxWidth, obstacle.Left)
+		minHeight = min(minHeight, obstacle.Top)
+		minWidth = min(minWidth, obstacle.Left)
+	}
+
+	fmt.Printf("length of the collision table: %d\n", len(collisions))
+
+	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
+
+	algorithm.SetWidth(int(maxWidth-minWidth) + 1)
+	algorithm.SetHeight(int(maxHeight-minHeight) + 1)
+	algorithm.SetOffset(int(minWidth), int(minHeight))
+	algorithm.InitGraph()
 }
 
 func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
@@ -202,56 +230,33 @@ func handlePlayerDisconnect(id uint32) {
 }
 
 func handleMapUpdate(update *pb.MapPositionsUpdate) {
-	var maxHeight int32 = 0
-	var maxWidth int32 = 0
-	var minHeight int32 = math.MaxInt32
-	var minWidth int32 = math.MaxInt32
-	//fmt.Println("Obstacles: ")
-	for _, obstacle := range update.Obstacles {
-		//fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
-		collisions = append(collisions, convertToCollision(obstacle))
-		maxHeight = max(maxHeight, obstacle.Top)
-		maxWidth = max(maxWidth, obstacle.Left)
-		minHeight = min(minHeight, obstacle.Top)
-		minWidth = min(minWidth, obstacle.Left)
-	}
-
 	//fmt.Println("Players: ")
 	fmt.Println(update.Players)
 	for _, player := range update.Players {
 		fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
-		players = append(players, g.Coordinate{
+		players[player.GetId()] = g.Coordinate{
 			X:      int(player.X),
 			Y:      int(player.Y),
 			Height: 0,
 			Width:  0,
-		})
+		}
 	}
 
-	//fmt.Println("Enemies: ")
 	for _, enemy := range update.Enemies {
-		//fmt.Printf("Enemy: x %d, y %d\n", enemy.GetDirectionX(), enemy.GetDirectionY())
+		//fmt.Printf("Enemy: x %f, y %f\n", enemy.GetX(), enemy.GetY())
 		enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()), int(enemy.GetY()))
+		//fmt.Printf("Enemies length: %d\n", len(enemies))
 	}
-	fmt.Printf("length of the collision table: %d\n", len(collisions))
 
-	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
+	algorithm.SetPlayers(players)
+	algorithm.SetEnemies(enemies)
 
 	start := time.Now()
-	algorithm.GetEnemiesUpdate(
-		int(maxWidth-minWidth)+1,
-		int(maxHeight-minHeight)+1,
-		int(minWidth),
-		int(minHeight),
-		collisions,
-		players,
-		enemies,
-	)
-	collisions = collisions[:0]
-	players = players[:0]
+	algorithm.GetEnemiesUpdate()
 	elapsed := time.Since(start)
+	//players = players[:0]
+	//algorithm.ClearGraph()
 	log.Printf("Finished after: %s\n", elapsed)
-
 }
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {

@@ -3,6 +3,8 @@ package game_controllers
 import (
 	"fmt"
 	"github.com/ungerik/go3d/vec2"
+	"log"
+	"math"
 	"server/errors"
 )
 
@@ -17,10 +19,12 @@ var (
 )
 
 type AIAlgorithm struct {
-	width, height, offsetWidth, offsetHeight int
-	collisions, players                      []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
-	enemies                                  map[uint32]*Enemy
-	graph                                    *[][]Cell
+	width, height, offsetWidth, offsetHeight       int
+	collisions                                     []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
+	players                                        map[uint32]Coordinate
+	enemies                                        map[uint32]*Enemy
+	graph                                          *[][]Cell
+	minBorderX, minBorderY, maxBorderX, maxBorderY int
 }
 
 type Cell struct {
@@ -40,8 +44,8 @@ func (c *Cell) GetCellValue() int {
 	return c.value
 }
 
-func (a *AIAlgorithm) GetEnemiesUpdate(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
-	a.createDistancesMap(width, height, offsetWidth, offsetHeight, collisions, players, enemies)
+func (a *AIAlgorithm) GetEnemiesUpdate() {
+	a.createDistancesMap()
 }
 
 func NewAIAlgorithm() *AIAlgorithm {
@@ -58,52 +62,68 @@ func (a *AIAlgorithm) initDirections() {
 	COLLISION = IDLE + 1
 }
 
-// TODO 1. niech inicjalizuje graf tylko raz na pokój - ściany są rysowane raz na pokój, potem zmienia się tylko ilość potworów, pozycja potworów i pozycja gracza
-// TODO 2. niech graf ma granice tam, gdzie najdalszy potwór/gracz
-// TODO 3. nieaktualizuje się pozycja gracza
-// TODO 4. niech tworzy się tylko jedna instancja algorytmu per serwer
-// TODO 5. tablica kolizji ciągle rośnie - ona nie jest czyszczona
-// TODO 6. sprawdź czy tablica graczy dodaje tylko jednego gracza per id - jak nie zrób mapę: klucz idGracza, wartość pozycja gracza
-// !!! TODO 7. x z y nie jest pomylony, potwory ciągle idą w lewy górny/dolny, nie idą nigdy w prawy górny/dolny
-// TODO 8. idą w jedna stronę, bo zawsze wysyłam tylko pierwszy ruch - może powinienem przesyłąć całą sekwencję ruchów
-// TODO 8.cd chodzi o to, że fixują się na pierwszym ruchu, bo nie przesyłam dalszej im ścieżki - zmiana ścieżki powinna następować po zmianie pozycji gracza (chyba???)
-func (a *AIAlgorithm) initAlgorithm(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
-	a.width = width
-	a.height = height
-	a.offsetWidth = offsetWidth
-	a.offsetHeight = offsetHeight
-	a.collisions = collisions
-	a.players = players
-	a.enemies = enemies
-}
+// TODO 1. zrób czyszczenie pozycji graczy i potworów z grafu
+// TODO 2, kiilkanaście razy ten sam potwór/gracz jest dodawany do mapy
+// TODO 3. ogranicz rysowanie vector field (nie tworzenie grafu) do najdalszego potwora/gracza
+// TODO 4. tablica kolizji ciągle rośnie - ona nie jest czyszczona
+// TODO 5. sprawdź czy tablica graczy dodaje tylko jednego gracza per id - jak nie zrób mapę: klucz idGracza, wartość pozycja gracza
+// TODO 6.
 
-func (a *AIAlgorithm) createDistancesMap(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
-	a.initAlgorithm(width, height, offsetWidth, offsetHeight, collisions, players, enemies)
+//func (a *AIAlgorithm) initAlgorithm(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
+//	a.width = width
+//	a.height = height
+//	a.offsetWidth = offsetWidth
+//	a.offsetHeight = offsetHeight
+//	a.collisions = collisions
+//	a.players = players
+//	a.enemies = enemies
+//}
+
+func (a *AIAlgorithm) createDistancesMap() {
 	a.initDirections()
-	a.initGraph()
+
+	a.addPlayers()
+	a.addCollisions()
+	a.findBorders()
+	// generating heat map
 	err := a.bfs()
 	if err != nil {
 		fmt.Println(err)
 	}
 
+	fmt.Printf("Value near player: %d\n", (*a.graph)[a.players[1].Y-a.offsetHeight+1][a.players[1].X-a.offsetWidth+1].value)
+
+	// generating vector field
 	a.fillDirections()
 	//for _, row := range *(a.graph) {
 	//	for _, el := range row {
-	//		fmt.Printf(" %2d |", el.value)
+	//		if el.direction != nil {
+	//			fmt.Printf("%9f, %9f, %2d||", el.direction.Get(1, 0), el.direction.Get(0, 1), el.value)
+	//		} else {
+	//			fmt.Printf("%9f, %9f, %2d||", 0.0, 0.0, 0)
+	//		}
 	//	}
 	//	fmt.Print("\n")
 	//}
 }
 
-func (a *AIAlgorithm) initGraph() {
+func (a *AIAlgorithm) InitGraph() {
 	graph := make([][]Cell, a.height)
 	for i := range graph {
 		graph[i] = make([]Cell, a.width)
 	}
 
 	a.graph = &graph
-	a.addPlayers()
-	a.addCollisions()
+}
+
+func (a *AIAlgorithm) ClearGraph() {
+	for i := range *a.graph {
+		row := (*a.graph)[i]
+		for j := range row {
+			row[j].direction = nil
+			row[j].value = 0
+		}
+	}
 }
 
 func (a *AIAlgorithm) addPlayers() {
@@ -118,6 +138,35 @@ func (a *AIAlgorithm) addCollisions() {
 	}
 }
 
+func (a *AIAlgorithm) findBorders() {
+	minBorderX := math.MaxInt
+	maxBorderX := 0
+	minBorderY := math.MaxInt
+	maxBorderY := 0
+
+	for _, enemy := range a.enemies {
+		position := enemy.GetPosition()
+		minBorderX = min(minBorderX, position.X)
+		minBorderY = min(minBorderY, position.Y)
+		maxBorderX = max(maxBorderX, position.X)
+		maxBorderY = max(maxBorderY, position.Y)
+	}
+
+	for _, player := range a.players {
+		minBorderX = min(minBorderX, player.X)
+		minBorderY = min(minBorderY, player.Y)
+		maxBorderX = max(maxBorderX, player.X)
+		maxBorderY = max(maxBorderY, player.Y)
+	}
+
+	a.maxBorderX = maxBorderX - a.offsetWidth
+	a.maxBorderY = maxBorderY - a.offsetHeight
+	a.minBorderX = minBorderX - a.offsetWidth
+	a.minBorderY = minBorderY - a.offsetHeight
+}
+
+// TODO ogranicz wyszukiwanie sąsiadów do najdalej oddalonego wroga i gracza
+// maksymalna/minimalna wartość to właśnie pozycja takiego granicznego wroga/gracza
 func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
 	for _, player := range a.players {
@@ -139,6 +188,7 @@ func (a *AIAlgorithm) bfs() error {
 			return errors.EmptyQueue
 		}
 
+		//if current.X >= a.minBorderX && current.X <= a.maxBorderX && current.Y >= a.minBorderY && current.Y <= a.maxBorderY {
 		neighbors := a.getNeighbors(current)
 		for _, next := range neighbors {
 			found := (*a.graph)[next.Y][next.X]
@@ -153,23 +203,26 @@ func (a *AIAlgorithm) bfs() error {
 
 		}
 	}
+	//}
 	return nil
 }
 
 func (a *AIAlgorithm) fillDirections() {
-	//for _, enemy := range a.enemies {
-	//	position := enemy.GetPosition()
-	//	parsedPosition := a.parseToMove(position)
-	//	enemy.SetDirection(parsedPosition)
-	//	(*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction = &parsedPosition
-	//}
-	for i := 0; i < a.height; i++ {
-		for j := 0; j < a.width; j++ {
+
+	for i := a.minBorderY; i < a.maxBorderY+1; i++ {
+		for j := a.minBorderX; j < a.maxBorderX+1; j++ {
 			value := (*a.graph)[i][j].value
 			if value != MIN && value != COLLISION {
 				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
 			}
 		}
+	}
+
+	for _, enemy := range a.enemies {
+		position := enemy.GetPosition()
+		vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
+		log.Printf("ENEMY %d POSITION from fillDirections: x %d, y %d, vector: x %f, y %f\n", enemy.GetId(), position.X, position.Y, vector.Get(1, 0), vector.Get(0, 1))
+		enemy.SetDirection(*vector)
 	}
 }
 
@@ -198,4 +251,25 @@ func (a *AIAlgorithm) printGrid(arr [][]int) {
 		fmt.Println(row)
 	}
 	fmt.Print("\n")
+}
+
+func (a *AIAlgorithm) SetWidth(width int) {
+	a.width = width
+}
+
+func (a *AIAlgorithm) SetHeight(height int) {
+	a.height = height
+}
+
+func (a *AIAlgorithm) SetOffset(offsetWidth, offsetHeight int) {
+	a.offsetWidth = offsetWidth
+	a.offsetHeight = offsetHeight
+}
+
+func (a *AIAlgorithm) SetPlayers(players map[uint32]Coordinate) {
+	a.players = players
+}
+
+func (a *AIAlgorithm) SetEnemies(enemies map[uint32]*Enemy) {
+	a.enemies = enemies
 }
