@@ -62,12 +62,7 @@ func (a *AIAlgorithm) initDirections() {
 	COLLISION = IDLE + 1
 }
 
-// TODO 1. zrób czyszczenie pozycji graczy i potworów z grafu
-// TODO 2, kiilkanaście razy ten sam potwór/gracz jest dodawany do mapy
-// TODO 3. ogranicz rysowanie vector field (nie tworzenie grafu) do najdalszego potwora/gracza
-// TODO 4. tablica kolizji ciągle rośnie - ona nie jest czyszczona
-// TODO 5. sprawdź czy tablica graczy dodaje tylko jednego gracza per id - jak nie zrób mapę: klucz idGracza, wartość pozycja gracza
-// TODO 6.
+// TODO 1. zrób czyszczenie mapy w takich samych granicach jak wypełnianie vector field
 
 //func (a *AIAlgorithm) initAlgorithm(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
 //	a.width = width
@@ -95,6 +90,8 @@ func (a *AIAlgorithm) createDistancesMap() {
 
 	// generating vector field
 	a.fillDirections()
+
+	// debbuging
 	//for _, row := range *(a.graph) {
 	//	for _, el := range row {
 	//		if el.direction != nil {
@@ -188,22 +185,22 @@ func (a *AIAlgorithm) bfs() error {
 			return errors.EmptyQueue
 		}
 
-		//if current.X >= a.minBorderX && current.X <= a.maxBorderX && current.Y >= a.minBorderY && current.Y <= a.maxBorderY {
-		neighbors := a.getNeighbors(current)
-		for _, next := range neighbors {
-			found := (*a.graph)[next.Y][next.X]
-			if found.direction == nil {
-				queue.put(next)
-				distance := (*a.graph)[current.Y][current.X].value + 1
-				if distance < (*a.graph)[next.Y][next.X].value {
-					distance = (*a.graph)[next.Y][next.X].value
+		if current.X >= a.minBorderX && current.X <= a.maxBorderX && current.Y >= a.minBorderY && current.Y <= a.maxBorderY {
+			neighbors := a.getNeighbors(current)
+			for _, next := range neighbors {
+				found := (*a.graph)[next.Y][next.X]
+				if found.direction == nil {
+					queue.put(next)
+					distance := (*a.graph)[current.Y][current.X].value + 1
+					if distance < (*a.graph)[next.Y][next.X].value {
+						distance = (*a.graph)[next.Y][next.X].value
+					}
+					(*a.graph)[next.Y][next.X] = Cell{&vec2.T{0, 0}, distance}
 				}
-				(*a.graph)[next.Y][next.X] = Cell{&vec2.T{0, 0}, distance}
-			}
 
+			}
 		}
 	}
-	//}
 	return nil
 }
 

@@ -16,15 +16,11 @@ import (
 )
 
 const (
-	MAX_PLAYERS = 8
-	SERVER_PORT = 9001
-	BUF_SIZE    = 4096
+	MAX_PLAYERS     = 8
+	SERVER_PORT     = 9001
+	BUF_SIZE        = 4096
+	SCALLING_FACTOR = 10
 )
-
-// TODO sprawdź czy ma sens rano
-// na początku pokoju przesyłam wygląd całego pokoju
-// potem w update przsyłam tylko to co się zmieniło czyli pewnie tylko pozycje graczy,
-// potem odsyłam graczom i tutaj jest problem bo całe mapy czy pozycje gdzie ma się jaki stwór poruszyć - przekmiń to
 
 var (
 	ip        = net.ParseIP("127.0.0.1")
@@ -191,9 +187,9 @@ func handleMapDimensionUpdate(update *pb.MapDimensionsUpdate) {
 
 	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
 
-	algorithm.SetWidth(int(maxWidth-minWidth) + 1)
-	algorithm.SetHeight(int(maxHeight-minHeight) + 1)
-	algorithm.SetOffset(int(minWidth), int(minHeight))
+	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
+	algorithm.SetHeight(int((maxHeight-minHeight)/SCALLING_FACTOR) + 1)
+	algorithm.SetOffset(int(minWidth/SCALLING_FACTOR), int(minHeight/SCALLING_FACTOR))
 	algorithm.InitGraph()
 }
 
@@ -235,8 +231,8 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	for _, player := range update.Players {
 		fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
 		players[player.GetId()] = g.Coordinate{
-			X:      int(player.X),
-			Y:      int(player.Y),
+			X:      int(player.X / SCALLING_FACTOR),
+			Y:      int(player.Y / SCALLING_FACTOR),
 			Height: 0,
 			Width:  0,
 		}
@@ -244,7 +240,7 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 
 	for _, enemy := range update.Enemies {
 		//fmt.Printf("Enemy: x %f, y %f\n", enemy.GetX(), enemy.GetY())
-		enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()), int(enemy.GetY()))
+		enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
 		//fmt.Printf("Enemies length: %d\n", len(enemies))
 	}
 
@@ -255,16 +251,16 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	algorithm.GetEnemiesUpdate()
 	elapsed := time.Since(start)
 	//players = players[:0]
-	//algorithm.ClearGraph()
+	algorithm.ClearGraph()
 	log.Printf("Finished after: %s\n", elapsed)
 }
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
-		X:      int(obstacle.Left),
-		Y:      int(obstacle.Top),
-		Height: int(obstacle.Height),
-		Width:  int(obstacle.Width),
+		X:      int(obstacle.Left / SCALLING_FACTOR),
+		Y:      int(obstacle.Top / SCALLING_FACTOR),
+		Height: int(obstacle.Height / SCALLING_FACTOR),
+		Width:  int(obstacle.Width / SCALLING_FACTOR),
 	}
 }
 
