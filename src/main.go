@@ -31,6 +31,12 @@ var (
 
 func listenTCP() {
 	stateUpdate := &pb.StateUpdate{
+		Player: &pb.Player{
+			Id: 0,
+			Weapon: &pb.Weapon{
+				Id: 0,
+			},
+		},
 		Variant: pb.StateVariant_CONNECTED,
 	}
 	prefix := &pb.BytePrefix{}
@@ -55,7 +61,8 @@ func listenTCP() {
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			stateUpdate.Id = id
+			stateUpdate.Player.Id = id
+			stateUpdate.Player.Weapon.Id = id
 
 			// create message with prefix byte length of update
 			// and the update itself
@@ -80,13 +87,17 @@ func listenTCP() {
 			lock.Unlock()
 
 			// inform player of current game state
-			gameState := &pb.GameState{
-				PlayerId:         id,
-				Seed:             seed,
-				ConnectedPlayers: connectedPlayers,
+			initialInfo := &pb.InitialInfo{
+				Player: &pb.Player{
+					Id:     id,
+					Weapon: &pb.Weapon{Id: id},
+				},
+				Seed:      seed,
+				PlayerIds: connectedPlayers,
+				WeaponIds: connectedPlayers,
 			}
 
-			encoded, _ = proto.Marshal(gameState)
+			encoded, _ = proto.Marshal(initialInfo)
 			log.Printf("connected: %d\n", id)
 
 			conn.Write(encoded)
@@ -98,6 +109,11 @@ func handleTCP(ch chan uint32) {
 	bs := make([]byte, BUF_SIZE)
 
 	msg := &pb.StateUpdate{
+		Player: &pb.Player{
+			Id:     0,
+			Weapon: &pb.Weapon{Id: 0},
+		},
+		Weapon:  &pb.Weapon{Id: 0},
 		Variant: pb.StateVariant_CONNECTED,
 	}
 	prefix := &pb.BytePrefix{}
@@ -131,7 +147,7 @@ func handleTCP(ch chan uint32) {
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				msg.Id = id
+				msg.Player.Id = id
 				msg.Variant = pb.StateVariant_DISCONNECTED
 
 				for otherID, c := range tcpConns {
