@@ -71,12 +71,12 @@ func listenTCP() {
 			bp, _ := proto.Marshal(prefix)
 			encoded := append(bp, bs...)
 
-			connectedPlayers := make([]uint32, 0, MAX_PLAYERS)
+			connectedPlayers := make([]*pb.Player, 0, MAX_PLAYERS)
 			lock.Lock()
 			for otherID, c := range tcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
 				// collect connected players
-				connectedPlayers = append(connectedPlayers, otherID)
+				connectedPlayers = append(connectedPlayers, &pb.Player{Id: otherID, Weapon: &pb.Weapon{Id: otherID}})
 
 				// inform connected players of new one
 				c.Write(encoded)
@@ -92,9 +92,8 @@ func listenTCP() {
 					Id:     id,
 					Weapon: &pb.Weapon{Id: id},
 				},
-				Seed:      seed,
-				PlayerIds: connectedPlayers,
-				WeaponIds: connectedPlayers,
+				Seed:             seed,
+				ConnectedPlayers: connectedPlayers,
 			}
 
 			encoded, _ = proto.Marshal(initialInfo)
@@ -147,8 +146,10 @@ func handleTCP(ch chan uint32) {
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				msg.Player.Id = id
-				msg.Variant = pb.StateVariant_DISCONNECTED
+				msg := &pb.StateUpdate{
+					Player:  &pb.Player{Id: id},
+					Variant: pb.StateVariant_DISCONNECTED,
+				}
 
 				for otherID, c := range tcpConns {
 					if otherID != id {
@@ -208,8 +209,6 @@ func handleUDP(ch chan uint32) {
 			received := &pb.MovementUpdate{}
 
 			err = proto.Unmarshal(b[:n], received)
-
-			log.Printf("%v\n", received)
 
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
