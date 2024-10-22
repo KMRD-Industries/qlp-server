@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
 	"io"
@@ -20,6 +19,10 @@ const (
 	SERVER_PORT     = 9001
 	BUF_SIZE        = 4096
 	SCALLING_FACTOR = 10
+	PLAYER_MIN_ID   = 1
+	PLAYER_MAX_ID   = 10
+	ENEMY_MIN_ID    = PLAYER_MAX_ID + 1
+	ENEMY_MAX_ID    = ENEMY_MIN_ID + 100
 )
 
 var (
@@ -27,7 +30,8 @@ var (
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
 	lock      = sync.RWMutex{}
-	ids       = newIDPool()
+	playerIds = newIDPool(PLAYER_MIN_ID, PLAYER_MAX_ID)
+	enemyIds  = newIDPool(ENEMY_MIN_ID, ENEMY_MAX_ID)
 
 	seed = time.Now().Unix()
 
@@ -53,7 +57,7 @@ func listenConnectionUpdates() {
 
 	for {
 		conn, err := listener.AcceptTCP()
-		id := ids.getID()
+		id := playerIds.getID()
 
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
@@ -72,6 +76,8 @@ func listenConnectionUpdates() {
 
 				// inform connected players of new one
 				encoded, _ := proto.Marshal(stateUpdate)
+				//TODO przemyśl co się stanie w przypadku jak gracz się rozłączy i będzie próbował ponownie dołączyć
+				// jak mu wrogów wysyłać
 				c.Write(encoded)
 			}
 
@@ -121,7 +127,7 @@ func handleTCP(ch chan uint32) {
 					}
 				case pb.StateVariant_MAP_UPDATE:
 
-					log.Printf("Map has been updated by user %d\n", msg.Id)
+					//log.Printf("Map has been updated by user %d\n", msg.Id)
 					handleMapUpdate(msg.MapPositionsUpdate)
 					// TODO jak tutaj przesyłam tą samą wiadomość na resztę połączeń to mi wybucha gra
 					// sprawdź to albo nie rób tak
@@ -138,6 +144,7 @@ func handleTCP(ch chan uint32) {
 						Variant:              pb.StateVariant_MAP_UPDATE,
 						EnemyPositionsUpdate: enemyPositionsUpdate,
 					}
+
 					for _, conn := range tcpConns {
 						serializedMsg, err := proto.Marshal(responseMsg)
 						if err != nil {
@@ -145,15 +152,29 @@ func handleTCP(ch chan uint32) {
 						}
 						conn.Write(serializedMsg)
 					}
-					continue
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
-					log.Println("MAP DIMENSIONS HAS BEEN SET...")
+					//log.Println("MAP DIMENSIONS HAS BEEN SET...")
 					handleMapDimensionUpdate(msg.MapDimensionsUpdate)
 				case pb.StateVariant_ROOM_CHANGED:
 					for otherID, otherConn := range tcpConns {
 						if id != otherID {
 							otherConn.Write(b[:n])
 						}
+					}
+				case pb.StateVariant_SPAWN_ENEMY_REQUEST:
+					spawnedEnemyResponse := handleSpawnEnemyRequest(msg.SpawnEnemyRequest)
+
+					responseMsg := &pb.StateUpdate{
+						Id:                msg.Id,
+						Variant:           pb.StateVariant_SPAWN_ENEMY_REQUEST,
+						SpawnEnemyRequest: spawnedEnemyResponse,
+					}
+					for _, conn := range tcpConns {
+						serializedMsg, err := proto.Marshal(responseMsg)
+						if err != nil {
+							log.Printf("Failed to serialize enemy spawn request response, err: %s\n", err)
+						}
+						conn.Write(serializedMsg)
 					}
 				}
 				continue
@@ -183,9 +204,9 @@ func handleMapDimensionUpdate(update *pb.MapDimensionsUpdate) {
 		minWidth = min(minWidth, obstacle.Left)
 	}
 
-	fmt.Printf("length of the collision table: %d\n", len(collisions))
+	//fmt.Printf("length of the collision table: %d\n", len(collisions))
 
-	fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
+	//fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
 
 	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
 	algorithm.SetHeight(int((maxHeight-minHeight)/SCALLING_FACTOR) + 1)
@@ -213,7 +234,7 @@ func handlePlayerDisconnect(id uint32) {
 	}
 	log.Printf("disconnected %d\n", id)
 
-	ids.returnID(id)
+	playerIds.returnID(id)
 
 	lock.RUnlock()
 	lock.Lock()
@@ -226,10 +247,9 @@ func handlePlayerDisconnect(id uint32) {
 }
 
 func handleMapUpdate(update *pb.MapPositionsUpdate) {
-	//fmt.Println("Players: ")
-	fmt.Println(update.Players)
+	//fmt.Println(update.Players)
 	for _, player := range update.Players {
-		fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
+		//fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
 		players[player.GetId()] = g.Coordinate{
 			X:      int(player.X / SCALLING_FACTOR),
 			Y:      int(player.Y / SCALLING_FACTOR),
@@ -240,19 +260,52 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 
 	for _, enemy := range update.Enemies {
 		//fmt.Printf("Enemy: x %f, y %f\n", enemy.GetX(), enemy.GetY())
-		enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
+		//enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
+		//TODO sprawdź czy enemies jest puste
+		enemies[enemy.GetId()].SetPosition(int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
 		//fmt.Printf("Enemies length: %d\n", len(enemies))
 	}
 
+	// TODO nie wiem czy nie da się jakoś sprytniej tego przypisywać - sprawdź to
 	algorithm.SetPlayers(players)
 	algorithm.SetEnemies(enemies)
 
-	start := time.Now()
+	//start := time.Now()
 	algorithm.GetEnemiesUpdate()
-	elapsed := time.Since(start)
 	//players = players[:0]
 	algorithm.ClearGraph()
-	log.Printf("Finished after: %s\n", elapsed)
+	//elapsed := time.Since(start)
+	//log.Printf("Finished after: %s\n", elapsed)
+}
+
+func handleSpawnEnemyRequest(enemyToSpawn *pb.Enemy) *pb.Enemy {
+	if isEnemySpawned(enemyToSpawn) {
+		log.Printf("Enemy is already spawned.\n")
+		// TODO zamiast nila zwracaj zrespionego potwora
+		return nil
+	}
+	newEnemyId := enemyIds.getID()
+	enemies[newEnemyId] = g.NewEnemy(newEnemyId, int(enemyToSpawn.X/SCALLING_FACTOR), int(enemyToSpawn.Y/SCALLING_FACTOR))
+
+	spawnedEnemyResponse := &pb.Enemy{
+		Id: newEnemyId,
+		X:  enemyToSpawn.X,
+		Y:  enemyToSpawn.Y,
+	}
+	//log.Printf("Spawned enemy with id: %d and position %f %f\n", newEnemyId, enemyToSpawn.X, enemyToSpawn.Y)
+
+	return spawnedEnemyResponse
+}
+
+// Sprawdzam tak na prawdę po pozycji, więc idk czy to zadziała
+func isEnemySpawned(enemyToSpawn *pb.Enemy) bool {
+	for _, value := range enemies {
+		position := value.GetPosition()
+		if position.X == int(enemyToSpawn.X/SCALLING_FACTOR) && position.Y == int(enemyToSpawn.Y/SCALLING_FACTOR) {
+			return true
+		}
+	}
+	return false
 }
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {

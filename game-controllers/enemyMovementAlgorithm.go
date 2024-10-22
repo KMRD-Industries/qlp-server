@@ -3,7 +3,6 @@ package game_controllers
 import (
 	"fmt"
 	"github.com/ungerik/go3d/vec2"
-	"log"
 	"math"
 	"server/errors"
 )
@@ -86,7 +85,7 @@ func (a *AIAlgorithm) createDistancesMap() {
 		fmt.Println(err)
 	}
 
-	fmt.Printf("Value near player: %d\n", (*a.graph)[a.players[1].Y-a.offsetHeight+1][a.players[1].X-a.offsetWidth+1].value)
+	//fmt.Printf("Value near player: %d\n", (*a.graph)[a.players[1].Y-a.offsetHeight+1][a.players[1].X-a.offsetWidth+1].value)
 
 	// generating vector field
 	a.fillDirections()
@@ -218,7 +217,7 @@ func (a *AIAlgorithm) fillDirections() {
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
 		vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
-		log.Printf("ENEMY %d POSITION from fillDirections: x %d, y %d, vector: x %f, y %f\n", enemy.GetId(), position.X, position.Y, vector.Get(1, 0), vector.Get(0, 1))
+		//log.Printf("ENEMY %d POSITION from fillDirections: x %d, y %d, vector: x %f, y %f\n", enemy.GetId(), position.X, position.Y, vector.Get(1, 0), vector.Get(0, 1))
 		enemy.SetDirection(*vector)
 	}
 }
@@ -232,7 +231,7 @@ func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
 	return move.Normalize()
 }
 
-// TODO coś tu nie gra - naprwa
+// TODO coś tu nie gra - naprw, konkretnie na samych brzegach, policz czy to na pewno dobrze tworzy te wektory
 func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
 	tmpResult := map[int]Coordinate{
 		UP:    {X: vertex.X, Y: max(0, vertex.Y-1)},
@@ -269,4 +268,8 @@ func (a *AIAlgorithm) SetPlayers(players map[uint32]Coordinate) {
 
 func (a *AIAlgorithm) SetEnemies(enemies map[uint32]*Enemy) {
 	a.enemies = enemies
+}
+
+func (a *AIAlgorithm) AddEnemy(enemy *Enemy) {
+	a.enemies[enemy.GetId()] = enemy
 }
