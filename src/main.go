@@ -95,7 +95,7 @@ func listenTCP() {
 func handleTCP(ch chan uint32) {
 	bs := make([]byte, BUF_SIZE)
 
-	msg := &pb.StateUpdate{}
+	stateUpdate := &pb.StateUpdate{}
 	prefix := &pb.BytePrefix{}
 
 	for {
@@ -105,21 +105,34 @@ func handleTCP(ch chan uint32) {
 			n, err := conn.Read(bs)
 
 			if err == nil {
-				err = proto.Unmarshal(bs[:n], msg)
+				err = proto.Unmarshal(bs[:n], stateUpdate)
 				if err != nil {
 					log.Printf("Failed to deserialize state update: %v\n", err)
 					continue
 				}
-				log.Printf("state update: %v\n", msg)
+				log.Printf("state update: %v\n", stateUpdate)
 
-				for otherID, otherConn := range tcpConns {
-					if id != otherID {
-						prefix.Bytes = uint32(n)
-						bp, _ := proto.Marshal(prefix)
+				switch stateUpdate.Variant {
+				case pb.StateVariant_REQUEST_ITEM_GENERATOR:
+					gameLock.Lock()
+					stateUpdate.Item = g.requestItemGenerator(stateUpdate.Player.Id).intoProtoItem()
+					gameLock.Unlock()
+					bs, _ := proto.Marshal(stateUpdate)
+					prefix.Bytes = uint32(len(bs))
+					bp, _ := proto.Marshal(prefix)
+					encoded := append(bp, bs...)
 
-						encoded := append(bp, bs[:n]...)
+					conn.Write(encoded)
+				default:
+					for otherID, otherConn := range tcpConns {
+						if id != otherID {
+							prefix.Bytes = uint32(n)
+							bp, _ := proto.Marshal(prefix)
 
-						otherConn.Write(encoded)
+							encoded := append(bp, bs[:n]...)
+
+							otherConn.Write(encoded)
+						}
 					}
 				}
 				continue

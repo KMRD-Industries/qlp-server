@@ -76,6 +76,7 @@ func (g *Game) createInitialInfo() *pb.InitialInfo {
 	return &pb.InitialInfo{
 		Player:           player.toProtoPlayer(),
 		Seed:             g.seed,
+		NextItem:         g.requestItemGenerator(playerID).intoProtoItem(),
 		ConnectedPlayers: connectedPlayers,
 	}
 }

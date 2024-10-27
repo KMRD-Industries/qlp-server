@@ -11,6 +11,10 @@ type Item struct {
 	variant pb.ItemType
 }
 
+func (item *Item) intoProtoItem() *pb.Item {
+	return &pb.Item{Gen: item.r, Type: item.variant}
+}
+
 type ItemGenerator struct {
 	currentGeneration uint32
 	generations       map[uint32]uint32
@@ -47,7 +51,11 @@ func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 	firstToProcess := true
 	generationExpired := true
 
-	for _, otherGen := range ig.nextGeneration {
+	for id, otherGen := range ig.nextGeneration {
+		if id == int(playerID) {
+			continue
+		}
+
 		if otherGen > gen {
 			firstToProcess = false
 		} else {
