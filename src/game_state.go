@@ -1,31 +1,33 @@
 package main
 
 import (
+	"math/rand/v2"
 	"time"
 
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 )
 
-type Weapon struct {
-	id uint32
-}
-
 type Player struct {
 	id         uint32
 	registered bool
-	weapon     *Weapon
+	items      []Item
 }
 
 func (p *Player) toProtoPlayer() *pb.Player {
+	items := make([]*pb.Item, len(p.items))
+	for i := range items {
+		base := p.items[i]
+		items[i] = &pb.Item{Gen: base.r, Type: base.variant}
+	}
+
 	return &pb.Player{
-		Id:     p.id,
-		Weapon: &pb.Weapon{Id: p.weapon.id},
+		Id:    p.id,
+		Items: items,
 	}
 }
 
 type Game struct {
 	players   []Player
-	weapons   map[uint32]*Weapon
 	generator *ItemGenerator
 	seed      int64
 	playerIDs *idPool
@@ -40,7 +42,6 @@ func newGame() *Game {
 
 	return &Game{
 		players:   players,
-		weapons:   make(map[uint32]*Weapon),
 		generator: newGenerator(MAX_PLAYERS + 1),
 		seed:      time.Now().Unix(),
 		playerIDs: newIDPool(1),
@@ -50,17 +51,19 @@ func newGame() *Game {
 
 func (g *Game) createInitialInfo() *pb.InitialInfo {
 	playerID := g.playerIDs.getID()
-	weaponID := g.weaponIDs.getID()
 
 	player := &g.players[playerID]
-	weapon := &Weapon{id: weaponID}
+	items := make([]Item, 2)
+
+	items[0].r = rand.Uint32()
+	items[0].variant = pb.ItemType_WEAPON
+
+	items[1].r = rand.Uint32()
+	items[1].variant = pb.ItemType_HELMET
 
 	player.id = playerID
 	player.registered = true
-	player.weapon = weapon
-
-	g.weapons[weaponID] = weapon
-	weapon.id = weaponID
+	player.items = items
 
 	connectedPlayers := make([]*pb.Player, 0, MAX_PLAYERS)
 
@@ -79,12 +82,15 @@ func (g *Game) createInitialInfo() *pb.InitialInfo {
 
 func (g *Game) removePlayer(playerID uint32) {
 	player := &g.players[playerID]
-	weaponID := player.weapon.id
 
 	player.registered = false
-	player.weapon = nil
+	player.items = nil
 
-	delete(g.weapons, weaponID)
+	g.playerIDs.returnID(playerID)
+}
+
+func (g *Game) getProtoPlayer(playerID uint32) *pb.Player {
+	return g.players[playerID].toProtoPlayer()
 }
 
 func (g *Game) requestItemGenerator(playerID uint32) *Item {

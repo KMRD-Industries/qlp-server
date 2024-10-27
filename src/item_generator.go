@@ -1,17 +1,14 @@
 package main
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
 
-const (
-	POTION = iota
-	WEAPON
-	HELMET
-	BODY_ARMOUR
+	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 )
 
 type Item struct {
 	r       uint32
-	variant uint32
+	variant pb.ItemType
 }
 
 type ItemGenerator struct {
@@ -69,5 +66,5 @@ func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 
 	ig.nextRandint[playerID] = ig.generations[gen+1]
 
-	return &Item{r: r, variant: WEAPON}
+	return &Item{r: r, variant: pb.ItemType_WEAPON}
 }

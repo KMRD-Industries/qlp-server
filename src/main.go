@@ -34,9 +34,6 @@ func listenTCP() {
 	stateUpdate := &pb.StateUpdate{
 		Player: &pb.Player{
 			Id: 0,
-			Weapon: &pb.Weapon{
-				Id: 0,
-			},
 		},
 		Variant: pb.StateVariant_CONNECTED,
 	}
@@ -63,11 +60,9 @@ func listenTCP() {
 		} else {
 			gameLock.Lock()
 			initialInfo := g.createInitialInfo()
-			gameLock.Unlock()
 			id := initialInfo.Player.Id
-
-			stateUpdate.Player.Id = id
-			stateUpdate.Player.Weapon.Id = id
+			stateUpdate.Player = g.getProtoPlayer(id)
+			gameLock.Unlock()
 
 			// create message with prefix byte length of update
 			// and the update itself
@@ -100,14 +95,7 @@ func listenTCP() {
 func handleTCP(ch chan uint32) {
 	bs := make([]byte, BUF_SIZE)
 
-	msg := &pb.StateUpdate{
-		Player: &pb.Player{
-			Id:     0,
-			Weapon: &pb.Weapon{Id: 0},
-		},
-		Weapon:  &pb.Weapon{Id: 0},
-		Variant: pb.StateVariant_CONNECTED,
-	}
+	msg := &pb.StateUpdate{}
 	prefix := &pb.BytePrefix{}
 
 	for {
