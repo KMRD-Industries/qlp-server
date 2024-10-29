@@ -16,8 +16,7 @@ type Player struct {
 func (p *Player) toProtoPlayer() *pb.Player {
 	items := make([]*pb.Item, len(p.items))
 	for i := range items {
-		base := p.items[i]
-		items[i] = &pb.Item{Gen: base.r, Type: base.variant}
+		items[i] = p.items[i].intoProtoItem()
 	}
 
 	return &pb.Player{
@@ -31,7 +30,6 @@ type Game struct {
 	generator *ItemGenerator
 	seed      int64
 	playerIDs *idPool
-	weaponIDs *idPool
 }
 
 func newGame() *Game {
@@ -45,7 +43,6 @@ func newGame() *Game {
 		generator: newGenerator(MAX_PLAYERS + 1),
 		seed:      time.Now().Unix(),
 		playerIDs: newIDPool(1),
-		weaponIDs: newIDPool(100),
 	}
 }
 
@@ -55,9 +52,11 @@ func (g *Game) createInitialInfo() *pb.InitialInfo {
 	player := &g.players[playerID]
 	items := make([]Item, 2)
 
+	items[0].id = g.generator.requestItemID()
 	items[0].r = rand.Uint32()
 	items[0].variant = pb.ItemType_WEAPON
 
+	items[1].id = g.generator.requestItemID()
 	items[1].r = rand.Uint32()
 	items[1].variant = pb.ItemType_HELMET
 
@@ -84,6 +83,9 @@ func (g *Game) createInitialInfo() *pb.InitialInfo {
 func (g *Game) removePlayer(playerID uint32) {
 	player := &g.players[playerID]
 
+	for _, item := range player.items {
+		g.generator.returnItemID(item.id)
+	}
 	player.registered = false
 	player.items = nil
 

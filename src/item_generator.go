@@ -7,43 +7,67 @@ import (
 )
 
 type Item struct {
+	id      uint32
 	r       uint32
 	variant pb.ItemType
 }
 
 func (item *Item) intoProtoItem() *pb.Item {
-	return &pb.Item{Gen: item.r, Type: item.variant}
+	return &pb.Item{Id: item.id, Gen: item.r, Type: item.variant}
 }
 
 type ItemGenerator struct {
-	currentGeneration uint32
-	generations       map[uint32]uint32
-	nextRandint       []uint32
-	nextGeneration    []uint32
+	currentGeneration  uint32
+	randintGenerations map[uint32]uint32
+	idGenerations      map[uint32]uint32
+	nextRandint        []uint32
+	nextID             []uint32
+	nextGeneration     []uint32
+	itemIDs            *idPool
 }
 
 func newGenerator(players int) *ItemGenerator {
 	r := rand.Uint32()
-	a := make([]uint32, players)
-	b := make([]uint32, players)
-	m := make(map[uint32]uint32)
-	m[0] = r
+	nextRandint := make([]uint32, players)
+	nextGeneration := make([]uint32, players)
+	nextID := make([]uint32, players)
 
-	for i := range a {
-		a[i] = r
-		b[i] = 0
+	randintGenerations := make(map[uint32]uint32)
+	randintGenerations[0] = r
+
+	idPool := newIDPool(100)
+	initialID := idPool.getID()
+	idGenerations := make(map[uint32]uint32)
+	idGenerations[0] = initialID
+
+	for i := range nextRandint {
+		nextRandint[i] = r
+		nextID[i] = initialID
+		nextGeneration[i] = 0
 	}
 
 	return &ItemGenerator{
-		currentGeneration: 0,
-		generations:       m,
-		nextRandint:       a,
-		nextGeneration:    b,
+		currentGeneration:  0,
+		randintGenerations: randintGenerations,
+		idGenerations:      idGenerations,
+		nextRandint:        nextRandint,
+		nextID:             nextID,
+		nextGeneration:     nextGeneration,
+		itemIDs:            newIDPool(100),
 	}
+}
+
+func (ig *ItemGenerator) requestItemID() uint32 {
+	return ig.itemIDs.getID()
+}
+
+func (ig *ItemGenerator) returnItemID(id uint32) {
+	ig.itemIDs.returnID(id)
 }
 
 func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 	r := ig.nextRandint[playerID]
+	itemID := ig.nextID[playerID]
 
 	gen := ig.nextGeneration[playerID]
 	ig.nextGeneration[playerID]++
@@ -65,14 +89,17 @@ func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 
 	if firstToProcess {
 		ig.currentGeneration++
-		ig.generations[ig.currentGeneration] = rand.Uint32()
+		ig.idGenerations[ig.currentGeneration] = ig.itemIDs.getID()
+		ig.randintGenerations[ig.currentGeneration] = rand.Uint32()
 	}
 
 	if generationExpired {
-		delete(ig.generations, gen)
+		delete(ig.randintGenerations, gen)
+		delete(ig.idGenerations, gen)
 	}
 
-	ig.nextRandint[playerID] = ig.generations[gen+1]
+	ig.nextRandint[playerID] = ig.randintGenerations[gen+1]
+	ig.nextID[playerID] = ig.idGenerations[gen+1]
 
-	return &Item{r: r, variant: pb.ItemType_WEAPON}
+	return &Item{id: itemID, r: r, variant: pb.ItemType_WEAPON}
 }
