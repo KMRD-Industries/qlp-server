@@ -6,6 +6,10 @@ import (
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 )
 
+var (
+	SPAWN_THRESHOLDS = [...]float32{0.3, 0.6, 0.85, 1}
+)
+
 type Item struct {
 	id      uint32
 	r       uint32
@@ -53,7 +57,7 @@ func newGenerator(players int) *ItemGenerator {
 		nextRandint:        nextRandint,
 		nextID:             nextID,
 		nextGeneration:     nextGeneration,
-		itemIDs:            newIDPool(100),
+		itemIDs:            idPool,
 	}
 }
 
@@ -101,5 +105,17 @@ func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 	ig.nextRandint[playerID] = ig.randintGenerations[gen+1]
 	ig.nextID[playerID] = ig.idGenerations[gen+1]
 
-	return &Item{id: itemID, r: r, variant: pb.ItemType_WEAPON}
+	var itemVariant pb.ItemType
+	switch r := rand.Float32(); {
+	case r < SPAWN_THRESHOLDS[0]:
+		itemVariant = pb.ItemType_POTION
+	case r < SPAWN_THRESHOLDS[1]:
+		itemVariant = pb.ItemType_WEAPON
+	case r < SPAWN_THRESHOLDS[2]:
+		itemVariant = pb.ItemType_HELMET
+	default:
+		itemVariant = pb.ItemType_ARMOUR
+	}
+
+	return &Item{id: itemID, r: r, variant: itemVariant}
 }
