@@ -32,7 +32,7 @@ type Cell struct {
 }
 
 type Coordinate struct {
-	X, Y, Height, Width int
+	X, Y, Height, Width float32
 }
 
 func (c *Cell) GetDirection() vec2.T {
@@ -62,16 +62,8 @@ func (a *AIAlgorithm) initDirections() {
 }
 
 // TODO 1. zrób czyszczenie mapy w takich samych granicach jak wypełnianie vector field
-
-//func (a *AIAlgorithm) initAlgorithm(width, height, offsetWidth, offsetHeight int, collisions, players []Coordinate, enemies map[uint32]*Enemy) {
-//	a.width = width
-//	a.height = height
-//	a.offsetWidth = offsetWidth
-//	a.offsetHeight = offsetHeight
-//	a.collisions = collisions
-//	a.players = players
-//	a.enemies = enemies
-//}
+//TODO 2. sprawdź czy czasem nie wypierdoli outOfRange jak dasz spawnery na samych krańcach mapy
+// na symulacji się nie da, przydałoby się ją zaaktualizować
 
 func (a *AIAlgorithm) createDistancesMap() {
 	a.initDirections()
@@ -84,8 +76,6 @@ func (a *AIAlgorithm) createDistancesMap() {
 	if err != nil {
 		fmt.Println(err)
 	}
-
-	//fmt.Printf("Value near player: %d\n", (*a.graph)[a.players[1].Y-a.offsetHeight+1][a.players[1].X-a.offsetWidth+1].value)
 
 	// generating vector field
 	a.fillDirections()
@@ -120,17 +110,35 @@ func (a *AIAlgorithm) ClearGraph() {
 			row[j].value = 0
 		}
 	}
+	//for i := a.minBorderY - 1; i <= a.maxBorderY; i++ {
+	//	for j := a.minBorderX - 1; j <= a.maxBorderX; j++ {
+	//		(*a.graph)[i][j].direction = nil
+	//		(*a.graph)[i][j].value = 0
+	//	}
+	//}
+	//fmt.Println("Cleared graph")
+
+	//for _, row := range *(a.graph) {
+	//	for _, el := range row {
+	//		if el.direction != nil {
+	//			fmt.Printf("%9f, %9f, %2d||", el.direction.Get(1, 0), el.direction.Get(0, 1), el.value)
+	//		} else {
+	//			fmt.Printf("%9f, %9f, %2d||", 0.0, 0.0, 0)
+	//		}
+	//	}
+	//	fmt.Print("\n")
+	//}
 }
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
-		(*a.graph)[player.Y-a.offsetHeight][player.X-a.offsetWidth] = Cell{&vec2.T{0, 0}, MIN}
+		(*a.graph)[int(player.Y)-a.offsetHeight][int(player.X)-a.offsetWidth] = Cell{&vec2.T{0, 0}, MIN}
 	}
 }
 
 func (a *AIAlgorithm) addCollisions() {
 	for _, coll := range a.collisions {
-		(*a.graph)[coll.Y-a.offsetHeight][coll.X-a.offsetHeight] = Cell{&vec2.T{0, 0}, COLLISION}
+		(*a.graph)[int(coll.Y)-a.offsetHeight][int(coll.X)-a.offsetHeight] = Cell{&vec2.T{0, 0}, COLLISION}
 	}
 }
 
@@ -142,17 +150,17 @@ func (a *AIAlgorithm) findBorders() {
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
-		minBorderX = min(minBorderX, position.X)
-		minBorderY = min(minBorderY, position.Y)
-		maxBorderX = max(maxBorderX, position.X)
-		maxBorderY = max(maxBorderY, position.Y)
+		minBorderX = min(minBorderX, int(position.X))
+		minBorderY = min(minBorderY, int(position.Y))
+		maxBorderX = max(maxBorderX, int(position.X))
+		maxBorderY = max(maxBorderY, int(position.Y))
 	}
 
 	for _, player := range a.players {
-		minBorderX = min(minBorderX, player.X)
-		minBorderY = min(minBorderY, player.Y)
-		maxBorderX = max(maxBorderX, player.X)
-		maxBorderY = max(maxBorderY, player.Y)
+		minBorderX = min(minBorderX, int(player.X))
+		minBorderY = min(minBorderY, int(player.Y))
+		maxBorderX = max(maxBorderX, int(player.X))
+		maxBorderY = max(maxBorderY, int(player.Y))
 	}
 
 	a.maxBorderX = maxBorderX - a.offsetWidth
@@ -167,8 +175,8 @@ func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
 	for _, player := range a.players {
 		playerWithOffset := Coordinate{
-			X:      player.X - a.offsetWidth,
-			Y:      player.Y - a.offsetHeight,
+			X:      player.X - float32(a.offsetWidth),
+			Y:      player.Y - float32(a.offsetHeight),
 			Height: player.Height,
 			Width:  player.Width}
 		queue.put(playerWithOffset)
@@ -184,19 +192,18 @@ func (a *AIAlgorithm) bfs() error {
 			return errors.EmptyQueue
 		}
 
-		if current.X >= a.minBorderX && current.X <= a.maxBorderX && current.Y >= a.minBorderY && current.Y <= a.maxBorderY {
+		if int(current.X) >= a.minBorderX && int(current.X) <= a.maxBorderX && int(current.Y) >= a.minBorderY && int(current.Y) <= a.maxBorderY {
 			neighbors := a.getNeighbors(current)
 			for _, next := range neighbors {
-				found := (*a.graph)[next.Y][next.X]
+				found := (*a.graph)[int(next.Y)][int(next.X)]
 				if found.direction == nil {
 					queue.put(next)
-					distance := (*a.graph)[current.Y][current.X].value + 1
-					if distance < (*a.graph)[next.Y][next.X].value {
-						distance = (*a.graph)[next.Y][next.X].value
+					distance := (*a.graph)[int(current.Y)][int(current.X)].value + 1
+					if distance < (*a.graph)[int(next.Y)][int(next.X)].value {
+						distance = (*a.graph)[int(next.Y)][int(next.X)].value
 					}
-					(*a.graph)[next.Y][next.X] = Cell{&vec2.T{0, 0}, distance}
+					(*a.graph)[int(next.Y)][int(next.X)] = Cell{&vec2.T{0, 0}, distance}
 				}
-
 			}
 		}
 	}
@@ -204,19 +211,18 @@ func (a *AIAlgorithm) bfs() error {
 }
 
 func (a *AIAlgorithm) fillDirections() {
-
 	for i := a.minBorderY; i < a.maxBorderY+1; i++ {
 		for j := a.minBorderX; j < a.maxBorderX+1; j++ {
 			value := (*a.graph)[i][j].value
 			if value != MIN && value != COLLISION {
-				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
+				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: float32(j), Y: float32(i)})
 			}
 		}
 	}
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
-		vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
+		vector := (*a.graph)[int(position.Y)-a.offsetHeight][int(position.X)-a.offsetWidth].direction
 		//log.Printf("ENEMY %d POSITION from fillDirections: x %d, y %d, vector: x %f, y %f\n", enemy.GetId(), position.X, position.Y, vector.Get(1, 0), vector.Get(0, 1))
 		enemy.SetDirection(*vector)
 	}
@@ -224,8 +230,8 @@ func (a *AIAlgorithm) fillDirections() {
 
 func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
 	neighbors := a.getNeighbors(position)
-	x := (*a.graph)[neighbors[LEFT].Y][neighbors[LEFT].X].value - (*a.graph)[neighbors[RIGHT].Y][neighbors[RIGHT].X].value
-	y := (*a.graph)[neighbors[DOWN].Y][neighbors[DOWN].X].value - (*a.graph)[neighbors[UP].Y][neighbors[UP].X].value
+	x := (*a.graph)[int(neighbors[LEFT].Y)][int(neighbors[LEFT].X)].value - (*a.graph)[int(neighbors[RIGHT].Y)][int(neighbors[RIGHT].X)].value
+	y := (*a.graph)[int(neighbors[DOWN].Y)][int(neighbors[DOWN].X)].value - (*a.graph)[int(neighbors[UP].Y)][int(neighbors[UP].X)].value
 
 	move := vec2.T{float32(x), float32(y)}
 	return move.Normalize()
@@ -233,20 +239,12 @@ func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
 
 // TODO coś tu nie gra - naprw, konkretnie na samych brzegach, policz czy to na pewno dobrze tworzy te wektory
 func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
-	tmpResult := map[int]Coordinate{
+	return map[int]Coordinate{
 		UP:    {X: vertex.X, Y: max(0, vertex.Y-1)},
 		LEFT:  {X: max(0, vertex.X-1), Y: vertex.Y},
-		DOWN:  {X: vertex.X, Y: min(a.height-1, vertex.Y+1)},
-		RIGHT: {X: min(a.width-1, vertex.X+1), Y: vertex.Y},
+		DOWN:  {X: vertex.X, Y: min(float32(a.height-1), vertex.Y+1)},
+		RIGHT: {X: min(float32(a.width-1), vertex.X+1), Y: vertex.Y},
 	}
-	return tmpResult
-}
-
-func (a *AIAlgorithm) printGrid(arr [][]int) {
-	for _, row := range arr {
-		fmt.Println(row)
-	}
-	fmt.Print("\n")
 }
 
 func (a *AIAlgorithm) SetWidth(width int) {
@@ -268,8 +266,4 @@ func (a *AIAlgorithm) SetPlayers(players map[uint32]Coordinate) {
 
 func (a *AIAlgorithm) SetEnemies(enemies map[uint32]*Enemy) {
 	a.enemies = enemies
-}
-
-func (a *AIAlgorithm) AddEnemy(enemy *Enemy) {
-	a.enemies[enemy.GetId()] = enemy
 }

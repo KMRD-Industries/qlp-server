@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/netip"
 	g "server/game-controllers"
+	u "server/utils"
 	"sync"
 	"time"
 )
@@ -35,10 +36,13 @@ var (
 
 	seed = time.Now().Unix()
 
-	collisions = make([]g.Coordinate, 0)
-	enemies    = make(map[uint32]*g.Enemy)
-	players    = make(map[uint32]g.Coordinate)
-	algorithm  = g.NewAIAlgorithm()
+	collisions        = make([]g.Coordinate, 0)
+	enemies           = make(map[uint32]*g.Enemy)
+	players           = make(map[uint32]g.Coordinate)
+	algorithm         = g.NewAIAlgorithm()
+	isSpawned         = false
+	spawnedEnemiesIds = make([]uint32, 0)
+	config            = u.Config{}
 )
 
 func listenConnectionUpdates() {
@@ -85,6 +89,7 @@ func listenConnectionUpdates() {
 			tcpConns[id] = conn
 			lock.Unlock()
 
+			// TODO dodać flagę z do spawnu potworów i w zależności od flagi odsyłać odpowiednie info, ręcznie usuwać spawnery jak zrespie potwory
 			// inform player of current game state
 			gameState := &pb.GameState{
 				PlayerId:         id,
@@ -125,12 +130,10 @@ func handleTCP(ch chan uint32) {
 							otherConn.Write(b[:n])
 						}
 					}
+					// TODO dodaj roomchange i tam daj id potworów
 				case pb.StateVariant_MAP_UPDATE:
-
 					//log.Printf("Map has been updated by user %d\n", msg.Id)
 					handleMapUpdate(msg.MapPositionsUpdate)
-					// TODO jak tutaj przesyłam tą samą wiadomość na resztę połączeń to mi wybucha gra
-					// sprawdź to albo nie rób tak
 					enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
 					for _, enemy := range enemies {
 						enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
@@ -162,20 +165,54 @@ func handleTCP(ch chan uint32) {
 						}
 					}
 				case pb.StateVariant_SPAWN_ENEMY_REQUEST:
-					spawnedEnemyResponse := handleSpawnEnemyRequest(msg.SpawnEnemyRequest)
+					if !isSpawned {
+						handleSpawnEnemyRequest(msg.EnemyPositionsUpdate.EnemyPositions)
+					}
+
+					spawnedEnemies := make([]*pb.Enemy, 0, len(enemies))
+					for _, enemy := range enemies {
+						textureData := enemy.GetTextureData()
+						collisionData := enemy.GetCollisionData()
+						protoEnemy := &pb.Enemy{
+							Id:     enemy.GetId(),
+							X:      enemy.GetPosition().X * SCALLING_FACTOR,
+							Y:      enemy.GetPosition().Y * SCALLING_FACTOR,
+							Type:   enemy.GetType(),
+							Name:   enemy.GetName(),
+							Hp:     enemy.GetHp(),
+							Damage: enemy.GetDamage(),
+							TextureData: &pb.TextureData{
+								TileId:    textureData.TileID,
+								TileSet:   textureData.TileSet,
+								TileLayer: textureData.TileLayer,
+							},
+							CollisionData: &pb.CollisionData{
+								Type:    collisionData.Type,
+								Width:   collisionData.Width,
+								Height:  collisionData.Height,
+								XOffset: collisionData.XOffset,
+								YOffset: collisionData.YOffset,
+							},
+						}
+						spawnedEnemies = append(spawnedEnemies, protoEnemy)
+					}
+
+					spawnedEnemiesMsg := &pb.EnemyPositionsUpdate{EnemyPositions: spawnedEnemies}
 
 					responseMsg := &pb.StateUpdate{
-						Id:                msg.Id,
-						Variant:           pb.StateVariant_SPAWN_ENEMY_REQUEST,
-						SpawnEnemyRequest: spawnedEnemyResponse,
+						Id:                   id,
+						Variant:              pb.StateVariant_SPAWN_ENEMY_REQUEST,
+						EnemyPositionsUpdate: spawnedEnemiesMsg,
 					}
-					for _, conn := range tcpConns {
-						serializedMsg, err := proto.Marshal(responseMsg)
-						if err != nil {
-							log.Printf("Failed to serialize enemy spawn request response, err: %s\n", err)
-						}
-						conn.Write(serializedMsg)
+
+					serializedMsg, err := proto.Marshal(responseMsg)
+					if err != nil {
+						log.Printf("Failed to serialize enemy spawn request response, err: %s\n", err)
 					}
+
+					tcpConns[id].Write(serializedMsg)
+					//case pb.StateVariant_ENEMY_HP_UPDATE:
+					//handleEnemyHpUpdate()
 				}
 				continue
 			}
@@ -251,19 +288,16 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	for _, player := range update.Players {
 		//fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
 		players[player.GetId()] = g.Coordinate{
-			X:      int(player.X / SCALLING_FACTOR),
-			Y:      int(player.Y / SCALLING_FACTOR),
+			X:      player.X / SCALLING_FACTOR,
+			Y:      player.Y / SCALLING_FACTOR,
 			Height: 0,
 			Width:  0,
 		}
 	}
 
 	for _, enemy := range update.Enemies {
-		//fmt.Printf("Enemy: x %f, y %f\n", enemy.GetX(), enemy.GetY())
-		//enemies[enemy.GetId()] = g.NewEnemy(enemy.GetId(), int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
 		//TODO sprawdź czy enemies jest puste
-		enemies[enemy.GetId()].SetPosition(int(enemy.GetX()/SCALLING_FACTOR), int(enemy.GetY()/SCALLING_FACTOR))
-		//fmt.Printf("Enemies length: %d\n", len(enemies))
+		enemies[enemy.GetId()].SetPosition(enemy.GetX()/SCALLING_FACTOR, enemy.GetY()/SCALLING_FACTOR)
 	}
 
 	// TODO nie wiem czy nie da się jakoś sprytniej tego przypisywać - sprawdź to
@@ -272,49 +306,55 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 
 	//start := time.Now()
 	algorithm.GetEnemiesUpdate()
-	//players = players[:0]
 	algorithm.ClearGraph()
 	//elapsed := time.Since(start)
 	//log.Printf("Finished after: %s\n", elapsed)
 }
 
-func handleSpawnEnemyRequest(enemyToSpawn *pb.Enemy) *pb.Enemy {
-	if isEnemySpawned(enemyToSpawn) {
-		log.Printf("Enemy is already spawned.\n")
-		// TODO zamiast nila zwracaj zrespionego potwora
-		return nil
+func handleSpawnEnemyRequest(enemiesToSpawn []*pb.Enemy) {
+	for _, enemyToSpawn := range enemiesToSpawn {
+		enemyId, err := spawnEnemy(enemyToSpawn)
+		if err != nil {
+			continue
+		}
+		spawnedEnemiesIds = append(spawnedEnemiesIds, enemyId)
 	}
-	newEnemyId := enemyIds.getID()
-	enemies[newEnemyId] = g.NewEnemy(newEnemyId, int(enemyToSpawn.X/SCALLING_FACTOR), int(enemyToSpawn.Y/SCALLING_FACTOR))
-
-	spawnedEnemyResponse := &pb.Enemy{
-		Id: newEnemyId,
-		X:  enemyToSpawn.X,
-		Y:  enemyToSpawn.Y,
-	}
-	//log.Printf("Spawned enemy with id: %d and position %f %f\n", newEnemyId, enemyToSpawn.X, enemyToSpawn.Y)
-
-	return spawnedEnemyResponse
+	isSpawned = true
 }
 
-// Sprawdzam tak na prawdę po pozycji, więc idk czy to zadziała
-func isEnemySpawned(enemyToSpawn *pb.Enemy) bool {
-	for _, value := range enemies {
-		position := value.GetPosition()
-		if position.X == int(enemyToSpawn.X/SCALLING_FACTOR) && position.Y == int(enemyToSpawn.Y/SCALLING_FACTOR) {
-			return true
-		}
-	}
-	return false
+func spawnEnemy(enemyToSpawn *pb.Enemy) (uint32, error) {
+	newEnemyId := enemyIds.getID()
+	//TODO jakoś rozwiązać problem z dzieleniem przez scalling factor przeciwników bo jak przesyłam przy spawnie info
+	// to je muszę spowrotem mnożyć xDDDDDDDDDD
+	//TODO na razie tylko potwory typu MELEE będą respione
+	enemyConfig := config.EnemyData[0]
+	enemies[newEnemyId] = g.NewEnemy(
+		newEnemyId,
+		enemyToSpawn.X/SCALLING_FACTOR,
+		enemyToSpawn.Y/SCALLING_FACTOR,
+		enemyConfig.Type,
+		enemyConfig.Name,
+		enemyConfig.HP,
+		enemyConfig.Damage,
+		enemyConfig.TextureData,
+		enemyConfig.CollisionData,
+	)
+	log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.X, enemyToSpawn.Y, enemyConfig.HP)
+
+	return newEnemyId, nil
 }
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
-		X:      int(obstacle.Left / SCALLING_FACTOR),
-		Y:      int(obstacle.Top / SCALLING_FACTOR),
-		Height: int(obstacle.Height / SCALLING_FACTOR),
-		Width:  int(obstacle.Width / SCALLING_FACTOR),
+		X:      float32(obstacle.Left / SCALLING_FACTOR),
+		Y:      float32(obstacle.Top / SCALLING_FACTOR),
+		Height: float32(obstacle.Height / SCALLING_FACTOR),
+		Width:  float32(obstacle.Width / SCALLING_FACTOR),
 	}
+}
+
+func handleEnemyHpUpdate(enemy *pb.Enemy) {
+
 }
 
 func handleUDP(ch chan uint32) {
@@ -380,6 +420,11 @@ func handleUDP(ch chan uint32) {
 }
 
 func main() {
+	var err error
+	config, err = u.NewJsonParser().ParseConfig("utils/config.json")
+	if err != nil {
+		return
+	}
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
 	go listenConnectionUpdates()
