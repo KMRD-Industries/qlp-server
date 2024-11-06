@@ -10,6 +10,10 @@ github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241102191828-b0aaa248ea40
 github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241102191828-b0aaa248ea40/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
 github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241102202738-76f3eb03e642 h1:ER2cN6EdHWH2Xfk4tmzCfFl5nVANpSvMZldQnIlWIF4=
 github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241102202738-76f3eb03e642/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241106165158-152d48ac69e3 h1:sCN1fx/nbUUWz7bp//uPY+fHnip7eqmNNCD4vKG9UzM=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241106165158-152d48ac69e3/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241106174030-9403ec4583c4 h1:fOLyHiyUrndKPfCJ4Kix2+fSX3WWePEd8odyKRjolww=
+github.com/kmrd-industries/qlp-proto-bindings v0.0.0-20241106174030-9403ec4583c4/go.mod h1:Mfx2LIeSPyHIrxidbsDOOx821+pdwA6Wzd7nqtFL9Zk=
 github.com/ungerik/go3d v0.0.0-20240502073936-1137f6adf7e9 h1:wMWP16Ijw+W+IXGcAzrwQDua1NBB4tP8iWECpg5DVRQ=
 github.com/ungerik/go3d v0.0.0-20240502073936-1137f6adf7e9/go.mod h1:ipEjrk2uLK4xX8ivWBPIVOD0fMtKyPI0strluUfIlYQ=
 golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543/go.mod h1:I/5z698sn9Ka8TeJc9MKroUUfqBBauWjQqLJ2OPfmY0=

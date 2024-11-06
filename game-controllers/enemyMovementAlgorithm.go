@@ -3,6 +3,7 @@ package game_controllers
 import (
 	"fmt"
 	"github.com/ungerik/go3d/vec2"
+	"log"
 	"math"
 	"server/errors"
 )
@@ -98,8 +99,8 @@ func (a *AIAlgorithm) InitGraph() {
 	for i := range graph {
 		graph[i] = make([]Cell, a.width)
 	}
-
 	a.graph = &graph
+	log.Printf("Created graph, width: %d, height: %d\n", a.width, a.height)
 }
 
 func (a *AIAlgorithm) ClearGraph() {
@@ -110,24 +111,6 @@ func (a *AIAlgorithm) ClearGraph() {
 			row[j].value = 0
 		}
 	}
-	//for i := a.minBorderY - 1; i <= a.maxBorderY; i++ {
-	//	for j := a.minBorderX - 1; j <= a.maxBorderX; j++ {
-	//		(*a.graph)[i][j].direction = nil
-	//		(*a.graph)[i][j].value = 0
-	//	}
-	//}
-	//fmt.Println("Cleared graph")
-
-	//for _, row := range *(a.graph) {
-	//	for _, el := range row {
-	//		if el.direction != nil {
-	//			fmt.Printf("%9f, %9f, %2d||", el.direction.Get(1, 0), el.direction.Get(0, 1), el.value)
-	//		} else {
-	//			fmt.Printf("%9f, %9f, %2d||", 0.0, 0.0, 0)
-	//		}
-	//	}
-	//	fmt.Print("\n")
-	//}
 }
 
 func (a *AIAlgorithm) addPlayers() {

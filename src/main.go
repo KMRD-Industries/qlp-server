@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"compress/zlib"
 	"errors"
+	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
 	"io"
@@ -43,6 +46,7 @@ var (
 	isSpawned         = false
 	spawnedEnemiesIds = make([]uint32, 0)
 	config            = u.Config{}
+	isGraph           = false
 )
 
 func listenConnectionUpdates() {
@@ -132,7 +136,8 @@ func handleTCP(ch chan uint32) {
 					}
 					// TODO dodaj roomchange i tam daj id potworów
 				case pb.StateVariant_MAP_UPDATE:
-					//log.Printf("Map has been updated by user %d\n", msg.Id)
+					// TODO tymczasowe rozwiązanie żeby gra się nie rozjeżdżała z granicami - jak będzie git działać to zostawię
+					//if isGraph {
 					handleMapUpdate(msg.MapPositionsUpdate)
 					enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
 					for _, enemy := range enemies {
@@ -155,9 +160,10 @@ func handleTCP(ch chan uint32) {
 						}
 						conn.Write(serializedMsg)
 					}
+					//}
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
 					//log.Println("MAP DIMENSIONS HAS BEEN SET...")
-					handleMapDimensionUpdate(msg.MapDimensionsUpdate)
+					handleMapDimensionUpdate(msg.CompressedMapDimensionsUpdate)
 				case pb.StateVariant_ROOM_CHANGED:
 					for otherID, otherConn := range tcpConns {
 						if id != otherID {
@@ -211,6 +217,7 @@ func handleTCP(ch chan uint32) {
 					}
 
 					tcpConns[id].Write(serializedMsg)
+					log.Printf("Sent spawned enemies to player %d\n", id)
 					//case pb.StateVariant_ENEMY_HP_UPDATE:
 					//handleEnemyHpUpdate()
 				}
@@ -226,13 +233,31 @@ func handleTCP(ch chan uint32) {
 	}
 }
 
-func handleMapDimensionUpdate(update *pb.MapDimensionsUpdate) {
+func handleMapDimensionUpdate(update []byte) {
+	zLibReader, err := zlib.NewReader(bytes.NewReader(update))
+	if err != nil {
+		fmt.Errorf("failed to create zlib reader: %v\n", err)
+		return
+	}
+	defer zLibReader.Close()
+
+	decompressedUpdate, err := io.ReadAll(zLibReader)
+	if err != nil {
+		fmt.Errorf("failed to decompress map dimension update data: %v\n", err)
+	}
+
 	var maxHeight int32 = 0
 	var maxWidth int32 = 0
 	var minHeight int32 = math.MaxInt32
 	var minWidth int32 = math.MaxInt32
+
+	var mapDimensionUpdate pb.MapDimensionsUpdate
+	if err := proto.Unmarshal(decompressedUpdate, &mapDimensionUpdate); err != nil {
+		fmt.Errorf("failed to unmarshal decompressedUpd")
+	}
+
 	//fmt.Println("Obstacles: ")
-	for _, obstacle := range update.Obstacles {
+	for _, obstacle := range mapDimensionUpdate.Obstacles {
 		//fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", obstacle.Top, obstacle.Left, obstacle.Height, obstacle.Width)
 		collisions = append(collisions, convertToCollision(obstacle))
 		maxHeight = max(maxHeight, obstacle.Top)
@@ -242,13 +267,15 @@ func handleMapDimensionUpdate(update *pb.MapDimensionsUpdate) {
 	}
 
 	//fmt.Printf("length of the collision table: %d\n", len(collisions))
-
 	//fmt.Printf("Height: %d, Real height: %d\nWidth: %d, Real width: %d\n", int(maxHeight-minHeight), maxHeight, int(maxWidth-minWidth), maxWidth)
 
 	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
 	algorithm.SetHeight(int((maxHeight-minHeight)/SCALLING_FACTOR) + 1)
 	algorithm.SetOffset(int(minWidth/SCALLING_FACTOR), int(minHeight/SCALLING_FACTOR))
 	algorithm.InitGraph()
+	isGraph = true
+	//TODO dostałem dwa updaty w lekkim odstępie czasu na init graph to nie powinno tak działać, sprawdź to, prawdopobnie to tenzjebany timer - usuń go potem
+	log.Printf("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
 }
 
 func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
@@ -260,6 +287,8 @@ func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
 }
 
 func handlePlayerDisconnect(id uint32) {
+	delete(players, id)
+	algorithm.SetPlayers(players)
 	msg := &pb.StateUpdate{Id: id,
 		Variant: pb.StateVariant_DISCONNECTED}
 
@@ -285,6 +314,7 @@ func handlePlayerDisconnect(id uint32) {
 
 func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	//fmt.Println(update.Players)
+	//TODO napraw handlowanie tego że plpayer się rozłącza i dalej jest dodawany do grafu
 	for _, player := range update.Players {
 		//fmt.Printf("Player: x %d, y %d\n", player.X, player.Y)
 		players[player.GetId()] = g.Coordinate{
@@ -307,6 +337,7 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	//start := time.Now()
 	algorithm.GetEnemiesUpdate()
 	algorithm.ClearGraph()
+	isGraph = false
 	//elapsed := time.Since(start)
 	//log.Printf("Finished after: %s\n", elapsed)
 }
@@ -346,10 +377,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) (uint32, error) {
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
-		X:      float32(obstacle.Left / SCALLING_FACTOR),
-		Y:      float32(obstacle.Top / SCALLING_FACTOR),
-		Height: float32(obstacle.Height / SCALLING_FACTOR),
-		Width:  float32(obstacle.Width / SCALLING_FACTOR),
+		X: float32(obstacle.Left / SCALLING_FACTOR),
+		Y: float32(obstacle.Top / SCALLING_FACTOR),
 	}
 }
 
