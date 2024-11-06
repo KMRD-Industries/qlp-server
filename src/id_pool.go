@@ -11,12 +11,12 @@ type idPool struct {
 	lock         sync.Mutex
 }
 
-func newIDPool() *idPool {
+func newIDPool(start uint32) *idPool {
 	pq := &PriorityQueue{}
 	heap.Init(pq)
 	return &idPool{
 		availableIDs: pq,
-		nextID:       1,
+		nextID:       start,
 		lock:         sync.Mutex{},
 	}
 }
