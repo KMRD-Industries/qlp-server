@@ -169,6 +169,12 @@ func handleTCP(ch chan uint32) {
 					conn.Close()
 					delete(tcpConns, id)
 				}
+
+				if len(tcpConns) == 0 {
+					gameLock.Lock()
+					g = newGame()
+					gameLock.Unlock()
+				}
 				connLock.Unlock()
 				connLock.RLock()
 			}
