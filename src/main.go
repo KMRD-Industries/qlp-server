@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"io"
 	"log"
 	"net"
@@ -20,6 +21,7 @@ const (
 )
 
 var (
+	ipString  = flag.String("a", "127.0.0.1", "server ip address")
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
@@ -244,6 +246,14 @@ func handleUDP(ch chan uint32) {
 }
 
 func main() {
+	flag.Parse()
+
+	if parsedIP := net.ParseIP(*ipString); parsedIP != nil {
+		ip = parsedIP
+	}
+
+	log.Printf("Starting server on: %v\n", ip)
+
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
 	go listenTCP()
