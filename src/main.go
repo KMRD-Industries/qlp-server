@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/zlib"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
@@ -116,16 +118,35 @@ func handleTCP(ch chan uint32) {
 		lock.RLock()
 		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			n, err := conn.Read(b)
+			reader := bufio.NewReader(conn)
+			sizeBuffer := make([]byte, 2)
+			//TODO sprawdź czy zwraca EOF ten reader
+			_, err := reader.Read(sizeBuffer)
+			//if err != nil {
+			//	continue
+			//}
+
+			size := binary.BigEndian.Uint16(sizeBuffer)
+			//log.Printf("Message size received from client: %d\n", size)
+			messageBuffer := make([]byte, size)
+
+			n, err := reader.Read(messageBuffer)
+			//if err != nil {
+			//	//log.Printf("failed to read from tcp connection\n")
+			//	continue
+			//}
 
 			if err == nil {
 				var msg pb.StateUpdate
-				err = proto.Unmarshal(b[:n], &msg)
+				err = proto.Unmarshal(messageBuffer[:n], &msg)
 				if err != nil {
-					log.Printf("Failed to deserialize state update: %v\n", err)
+					//log.Printf("Failed to deserialize state update, message size: %d, err: %v\n", size, err)
 					continue
 				}
 				//log.Printf("state update: %v\n", &msg)
+				if msg.Variant != pb.StateVariant_MAP_UPDATE && msg.Variant != pb.StateVariant_NONE {
+					log.Printf("Message Variant: %s\n", msg.Variant)
+				}
 
 				switch msg.Variant {
 				case pb.StateVariant_DISCONNECTED:
@@ -136,37 +157,44 @@ func handleTCP(ch chan uint32) {
 					}
 					// TODO dodaj roomchange i tam daj id potworów
 				case pb.StateVariant_MAP_UPDATE:
-					// TODO tymczasowe rozwiązanie żeby gra się nie rozjeżdżała z granicami - jak będzie git działać to zostawię
-					//if isGraph {
-					handleMapUpdate(msg.MapPositionsUpdate)
-					enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
-					for _, enemy := range enemies {
-						enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
-					}
-
-					enemyPositionsUpdate := &pb.EnemyPositionsUpdate{
-						EnemyPositions: enemiesToSend,
-					}
-					responseMsg := &pb.StateUpdate{
-						Id:                   msg.Id,
-						Variant:              pb.StateVariant_MAP_UPDATE,
-						EnemyPositionsUpdate: enemyPositionsUpdate,
-					}
-
-					for _, conn := range tcpConns {
-						serializedMsg, err := proto.Marshal(responseMsg)
-						if err != nil {
-							log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
+					if false {
+						handleMapUpdate(msg.MapPositionsUpdate)
+						enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
+						for _, enemy := range enemies {
+							enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
 						}
-						conn.Write(serializedMsg)
+
+						enemyPositionsUpdate := &pb.EnemyPositionsUpdate{
+							EnemyPositions: enemiesToSend,
+						}
+						responseMsg := &pb.StateUpdate{
+							Id:                   msg.Id,
+							Variant:              pb.StateVariant_MAP_UPDATE,
+							EnemyPositionsUpdate: enemyPositionsUpdate,
+						}
+
+						for _, conn := range tcpConns {
+							serializedMsg, err := proto.Marshal(responseMsg)
+							if err != nil {
+								log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
+							}
+							conn.Write(serializedMsg)
+						}
 					}
-					//}
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
 					//log.Println("MAP DIMENSIONS HAS BEEN SET...")
+					//TODO idzie tyle updatów ile graczy bo room change nie jest wysyłany przy zmianie poziomu
+					// wywołanie MoveDownDungeon po stronie kilenta
 					handleMapDimensionUpdate(msg.CompressedMapDimensionsUpdate)
+					//}
 				case pb.StateVariant_ROOM_CHANGED:
+					//isMapUpdated = false
+					log.Println("Room changed")
+					isGraph = false
+					log.Println("-------------------------------")
 					for otherID, otherConn := range tcpConns {
 						if id != otherID {
+							// TODO zmień to b bo ci nie zadziała drugi gracz - jakoś trzeba ładniej to wysylać
 							otherConn.Write(b[:n])
 						}
 					}
@@ -218,6 +246,7 @@ func handleTCP(ch chan uint32) {
 
 					tcpConns[id].Write(serializedMsg)
 					log.Printf("Sent spawned enemies to player %d\n", id)
+					log.Println("-------------------------------")
 					//case pb.StateVariant_ENEMY_HP_UPDATE:
 					//handleEnemyHpUpdate()
 				}
@@ -337,7 +366,6 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 	//start := time.Now()
 	algorithm.GetEnemiesUpdate()
 	algorithm.ClearGraph()
-	isGraph = false
 	//elapsed := time.Since(start)
 	//log.Printf("Finished after: %s\n", elapsed)
 }
