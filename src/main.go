@@ -118,19 +118,33 @@ func handleTCP(ch chan uint32) {
 		lock.RLock()
 		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			reader := bufio.NewReader(conn)
+			reader := bufio.NewReaderSize(conn, 8192)
+
+			_, err := reader.Peek(2)
+			if err != nil {
+				//log.Println("there is not enough bytes to read size", err)
+				continue
+			}
+
 			sizeBuffer := make([]byte, 2)
-			//TODO sprawdź czy zwraca EOF ten reader
-			_, err := reader.Read(sizeBuffer)
+			_, err = io.ReadFull(reader, sizeBuffer)
 			//if err != nil {
 			//	continue
 			//}
 
 			size := binary.BigEndian.Uint16(sizeBuffer)
-			//log.Printf("Message size received from client: %d\n", size)
-			messageBuffer := make([]byte, size)
 
-			n, err := reader.Read(messageBuffer)
+			conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+			_, err = reader.Peek(int(size))
+			if err != nil {
+				// TODO PRZEŁOMOWY ERROR
+				//log.Println("there is not enough bytes to read for this message: ", err)
+				continue
+			}
+
+			messageBuffer := make([]byte, size)
+			//log.Printf("Read %d bytes from update\n", size)
+			n, err := io.ReadFull(reader, messageBuffer)
 			//if err != nil {
 			//	//log.Printf("failed to read from tcp connection\n")
 			//	continue
@@ -138,7 +152,7 @@ func handleTCP(ch chan uint32) {
 
 			if err == nil {
 				var msg pb.StateUpdate
-				err = proto.Unmarshal(messageBuffer[:n], &msg)
+				err = proto.Unmarshal(messageBuffer, &msg)
 				if err != nil {
 					//log.Printf("Failed to deserialize state update, message size: %d, err: %v\n", size, err)
 					continue
@@ -157,7 +171,7 @@ func handleTCP(ch chan uint32) {
 					}
 					// TODO dodaj roomchange i tam daj id potworów
 				case pb.StateVariant_MAP_UPDATE:
-					if false {
+					if isGraph {
 						handleMapUpdate(msg.MapPositionsUpdate)
 						enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
 						for _, enemy := range enemies {
@@ -182,16 +196,17 @@ func handleTCP(ch chan uint32) {
 						}
 					}
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
-					//log.Println("MAP DIMENSIONS HAS BEEN SET...")
 					//TODO idzie tyle updatów ile graczy bo room change nie jest wysyłany przy zmianie poziomu
 					// wywołanie MoveDownDungeon po stronie kilenta
 					handleMapDimensionUpdate(msg.CompressedMapDimensionsUpdate)
 					//}
 				case pb.StateVariant_ROOM_CHANGED:
-					//isMapUpdated = false
 					log.Println("Room changed")
-					isGraph = false
 					log.Println("-------------------------------")
+					enemies = make(map[uint32]*g.Enemy)
+					players = make(map[uint32]g.Coordinate)
+					isGraph = false
+					isSpawned = false
 					for otherID, otherConn := range tcpConns {
 						if id != otherID {
 							// TODO zmień to b bo ci nie zadziała drugi gracz - jakoś trzeba ładniej to wysylać
@@ -247,8 +262,6 @@ func handleTCP(ch chan uint32) {
 					tcpConns[id].Write(serializedMsg)
 					log.Printf("Sent spawned enemies to player %d\n", id)
 					log.Println("-------------------------------")
-					//case pb.StateVariant_ENEMY_HP_UPDATE:
-					//handleEnemyHpUpdate()
 				}
 				continue
 			}
