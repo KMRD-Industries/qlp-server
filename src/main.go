@@ -134,11 +134,10 @@ func handleTCP(ch chan uint32) {
 
 			size := binary.BigEndian.Uint16(sizeBuffer)
 
-			conn.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+			//conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			_, err = reader.Peek(int(size))
 			if err != nil {
-				// TODO PRZEŁOMOWY ERROR
-				//log.Println("there is not enough bytes to read for this message: ", err)
+				//log.Printf("there is not enough bytes to read for this message\nmessage size %d, err: \n", size, err)
 				continue
 			}
 
@@ -187,11 +186,12 @@ func handleTCP(ch chan uint32) {
 							EnemyPositionsUpdate: enemyPositionsUpdate,
 						}
 
+						serializedMsg, err := proto.Marshal(responseMsg)
+						if err != nil {
+							log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
+						}
+
 						for _, conn := range tcpConns {
-							serializedMsg, err := proto.Marshal(responseMsg)
-							if err != nil {
-								log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
-							}
 							conn.Write(serializedMsg)
 						}
 					}
@@ -369,7 +369,10 @@ func handleMapUpdate(update *pb.MapPositionsUpdate) {
 
 	for _, enemy := range update.Enemies {
 		//TODO sprawdź czy enemies jest puste
-		enemies[enemy.GetId()].SetPosition(enemy.GetX()/SCALLING_FACTOR, enemy.GetY()/SCALLING_FACTOR)
+		enemyOnBoard := enemies[enemy.GetId()]
+		if enemyOnBoard != nil {
+			enemies[enemy.GetId()].SetPosition(enemy.GetX()/SCALLING_FACTOR, enemy.GetY()/SCALLING_FACTOR)
+		}
 	}
 
 	// TODO nie wiem czy nie da się jakoś sprytniej tego przypisywać - sprawdź to
@@ -443,6 +446,7 @@ func handleUDP(ch chan uint32) {
 	defer conn.Close()
 
 	for {
+
 		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
 		n, sender, err := conn.ReadFromUDP(b)
 
@@ -453,41 +457,138 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			received := &pb.PositionUpdate{}
+			msg := &pb.StateUpdate{}
 
-			err = proto.Unmarshal(b[:n], received)
-
-			//log.Printf("%v\n", received)
-
+			err = proto.Unmarshal(b[:n], msg)
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
 				continue
 			}
 
-			senderAddrPort := sender.AddrPort()
-			id := received.EntityId
-
-			// skip packets from disconnected player
-			lock.RLock()
-			if _, ok := tcpConns[id]; !ok {
-				continue
-			}
-			lock.RUnlock()
-
-			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
-				addrPorts[id] = senderAddrPort
+			if msg.Variant != pb.StateVariant_NONE {
+				//log.Println("essa")
 			}
 
-			// pass update to other players
-			for otherID, addrPort := range addrPorts {
-				if otherID != id {
-					udpAddr := net.UDPAddrFromAddrPort(addrPort)
-					conn.WriteToUDP(b[:n], udpAddr)
+			switch msg.Variant {
+			case pb.StateVariant_PLAYER_POSITION_UPDATE:
+
+				positionUpdate := msg.PositionUpdate
+
+				senderAddrPort := sender.AddrPort()
+				id := positionUpdate.EntityId
+
+				lock.RLock()
+				// skip packets from disconnected player
+				if _, ok := tcpConns[id]; !ok {
+					continue
+				}
+				lock.RUnlock()
+
+				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
+					addrPorts[id] = senderAddrPort
+				}
+
+				// pass update to other players
+				for otherID, addrPort := range addrPorts {
+					if otherID != id {
+						udpAddr := net.UDPAddrFromAddrPort(addrPort)
+						conn.WriteToUDP(b[:n], udpAddr)
+					}
+				}
+			case pb.StateVariant_MAP_UPDATE:
+				if isGraph {
+					handleMapUpdate(msg.MapPositionsUpdate)
+					enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
+					for _, enemy := range enemies {
+						enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
+					}
+
+					enemyPositionsUpdate := &pb.EnemyPositionsUpdate{
+						EnemyPositions: enemiesToSend,
+					}
+					responseMsg := &pb.StateUpdate{
+						Id:                   msg.Id,
+						Variant:              pb.StateVariant_MAP_UPDATE,
+						EnemyPositionsUpdate: enemyPositionsUpdate,
+					}
+
+					serializedMsg, err := proto.Marshal(responseMsg)
+					if err != nil {
+						log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
+					}
+
+					for _, addrPort := range addrPorts {
+						udpAddr := net.UDPAddrFromAddrPort(addrPort)
+						conn.WriteToUDP(serializedMsg, udpAddr)
+
+					}
 				}
 			}
 		}
 	}
 }
+
+//func handleUDP(ch chan uint32) {
+//	addr := net.UDPAddr{
+//		Port: SERVER_PORT,
+//		IP:   ip,
+//	}
+//	b := make([]byte, BUF_SIZE)
+//
+//	conn, err := net.ListenUDP("udp", &addr)
+//
+//	if err != nil {
+//		log.Printf("Failed to open udp socket: %v\n", err)
+//		return
+//	}
+//	defer conn.Close()
+//
+//	for {
+//		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+//		n, sender, err := conn.ReadFromUDP(b)
+//
+//		select {
+//		case id := <-ch:
+//			delete(addrPorts, id)
+//		default:
+//		}
+//
+//		if err == nil {
+//			received := &pb.PositionUpdate{}
+//
+//			err = proto.Unmarshal(b[:n], received)
+//
+//			//log.Printf("%v\n", received)
+//
+//			if err != nil {
+//				log.Printf("Failed to deserialize: %v\n", err)
+//				continue
+//			}
+//
+//			senderAddrPort := sender.AddrPort()
+//			id := received.EntityId
+//
+//			// skip packets from disconnected player
+//			lock.RLock()
+//			if _, ok := tcpConns[id]; !ok {
+//				continue
+//			}
+//			lock.RUnlock()
+//
+//			if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
+//				addrPorts[id] = senderAddrPort
+//			}
+//
+//			// pass update to other players
+//			for otherID, addrPort := range addrPorts {
+//				if otherID != id {
+//					udpAddr := net.UDPAddrFromAddrPort(addrPort)
+//					conn.WriteToUDP(b[:n], udpAddr)
+//				}
+//			}
+//		}
+//	}
+//}
 
 func main() {
 	var err error
