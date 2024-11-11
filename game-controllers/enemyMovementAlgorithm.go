@@ -63,8 +63,8 @@ func (a *AIAlgorithm) initDirections() {
 }
 
 // TODO 1. zrób czyszczenie mapy w takich samych granicach jak wypełnianie vector field
-//TODO 2. sprawdź czy czasem nie wypierdoli outOfRange jak dasz spawnery na samych krańcach mapy
-// na symulacji się nie da, przydałoby się ją zaaktualizować
+// TODO 2. potwory się buggują i nie widzą drugiego playera i idą tylko do jednego
+// TODO 3. źle się kolizję wypełniają i potwory wchodzą mi w ścianę
 
 func (a *AIAlgorithm) createDistancesMap() {
 	a.initDirections()
@@ -220,7 +220,6 @@ func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
 	return move.Normalize()
 }
 
-// TODO coś tu nie gra - naprw, konkretnie na samych brzegach, policz czy to na pewno dobrze tworzy te wektory
 func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
 	return map[int]Coordinate{
 		UP:    {X: vertex.X, Y: max(0, vertex.Y-1)},
