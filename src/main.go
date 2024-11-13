@@ -5,6 +5,7 @@ import (
 	"flag"
 	"io"
 	"log"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"sync"
@@ -25,14 +26,13 @@ var (
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
-	g         = newGame()
-	gameLock  = sync.Mutex{}
-	connLock  = sync.RWMutex{}
 
-	seed = time.Now().Unix()
+	connLock = sync.RWMutex{}
 )
 
-func listenTCP() {
+func listenTCP(seed int64, incommingUpdates, outgointUpdates chan GameUpdate) {
+	game := newGame(seed)
+
 	stateUpdate := &pb.StateUpdate{
 		Player: &pb.Player{
 			Id: 0,
@@ -60,11 +60,32 @@ func listenTCP() {
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			gameLock.Lock()
-			initialInfo := g.createInitialInfo()
+			// collect game updates from the channel since last connection
+			moreUpdates := true
+			for moreUpdates {
+				select {
+				case v := <-incommingUpdates:
+					switch v.variant {
+					case PLAYER_CONNECTED:
+						game.setPlayer(v.player)
+					case PLAYER_DISCONNECTED:
+						game.removePlayer(v.player.id)
+					case ITEM_GENERATOR_REQUESTED:
+						game.requestItemGenerator(v.player.id, v.u, v.f)
+					case GAME_RESTARTED:
+						game = newGame(v.i)
+					default:
+					}
+				default:
+					moreUpdates = false
+				}
+			}
+
+			initialInfo := game.createInitialInfo()
 			id := initialInfo.Player.Id
-			stateUpdate.Player = g.getProtoPlayer(id)
-			gameLock.Unlock()
+			stateUpdate.Player = game.getProtoPlayer(id)
+
+			outgointUpdates <- GameUpdate{variant: PLAYER_CONNECTED, player: game.getPlayer(id)}
 
 			// create message with prefix byte length of update
 			// and the update itself
@@ -94,7 +115,8 @@ func listenTCP() {
 	}
 }
 
-func handleTCP(ch chan uint32) {
+func handleTCP(ch chan uint32, seed int64, incommingUpdates, outgoingUpdates chan GameUpdate) {
+	game := newGame(seed)
 	bs := make([]byte, BUF_SIZE)
 
 	updateSeries := &pb.StateUpdateSeries{}
@@ -107,6 +129,21 @@ func handleTCP(ch chan uint32) {
 			n, err := conn.Read(bs)
 
 			if err == nil {
+				moreUpdates := true
+
+				for moreUpdates {
+					select {
+					case v := <-incommingUpdates:
+						switch v.variant {
+						case PLAYER_CONNECTED:
+							game.setPlayer(v.player)
+						default:
+						}
+					default:
+						moreUpdates = false
+					}
+				}
+
 				err = proto.Unmarshal(bs[:n], updateSeries)
 				if err != nil {
 					log.Printf("Failed to deserialize state update: %v\n", err)
@@ -118,9 +155,12 @@ func handleTCP(ch chan uint32) {
 
 					switch update.Variant {
 					case pb.StateVariant_REQUEST_ITEM_GENERATOR:
-						gameLock.Lock()
-						update.Item = g.requestItemGenerator(update.Player.Id).intoProtoItem()
-						gameLock.Unlock()
+						u := rand.Uint32()
+						f := rand.Float32()
+						update.Item = game.requestItemGenerator(update.Player.Id, u, f).intoProtoItem()
+
+						outgoingUpdates <- GameUpdate{variant: ITEM_GENERATOR_REQUESTED, u: u, f: f}
+
 						bs, _ := proto.Marshal(update)
 						prefix.Bytes = uint32(len(bs))
 						bp, _ := proto.Marshal(prefix)
@@ -146,9 +186,8 @@ func handleTCP(ch chan uint32) {
 			if errors.Is(err, io.EOF) {
 				ch <- id
 
-				gameLock.Lock()
-				g.removePlayer(id)
-				gameLock.Unlock()
+				outgoingUpdates <- GameUpdate{variant: PLAYER_DISCONNECTED, player: game.getPlayer(id)}
+				game.removePlayer(id)
 
 				msg := &pb.StateUpdate{
 					Player:  &pb.Player{Id: id},
@@ -176,10 +215,12 @@ func handleTCP(ch chan uint32) {
 				}
 
 				if len(tcpConns) == 0 {
-					gameLock.Lock()
-					g = newGame()
-					gameLock.Unlock()
+					seed := time.Now().Unix()
+					game = newGame(seed)
+
+					outgoingUpdates <- GameUpdate{variant: GAME_RESTARTED, i: seed}
 				}
+
 				connLock.Unlock()
 				connLock.RLock()
 			}
@@ -256,11 +297,15 @@ func main() {
 	}
 
 	log.Printf("Starting server on: %v\n", ip)
+	seed := time.Now().Unix()
 
 	ch := make(chan uint32, 32)
+	gameChannel1 := make(chan GameUpdate, 32)
+	gameChannel2 := make(chan GameUpdate, 32)
+
 	go handleUDP(ch)
-	go listenTCP()
-	go handleTCP(ch)
+	go listenTCP(seed, gameChannel1, gameChannel2)
+	go handleTCP(ch, seed, gameChannel2, gameChannel1)
 
 	for {
 	}

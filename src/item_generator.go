@@ -78,7 +78,7 @@ func (ig *ItemGenerator) returnItemID(id uint32) {
 	ig.itemIDs.returnID(id)
 }
 
-func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
+func (ig *ItemGenerator) requestItemGenerator(playerID uint32, nextUint uint32, nextFloat float32) *Item {
 	r := ig.nextRandint[playerID]
 	itemID := ig.nextID[playerID]
 	itemVariant := ig.nextVariant[playerID]
@@ -104,10 +104,10 @@ func (ig *ItemGenerator) requestItemGenerator(playerID uint32) *Item {
 	if firstToProcess {
 		ig.currentGeneration++
 		ig.idGenerations[ig.currentGeneration] = ig.itemIDs.getID()
-		ig.randintGenerations[ig.currentGeneration] = rand.Uint32()
+		ig.randintGenerations[ig.currentGeneration] = nextUint
 
 		var nextVariant pb.ItemType
-		switch r := rand.Float32(); {
+		switch r := nextFloat; {
 		case r < SPAWN_THRESHOLDS[0]:
 			nextVariant = pb.ItemType_POTION
 		case r < SPAWN_THRESHOLDS[1]:

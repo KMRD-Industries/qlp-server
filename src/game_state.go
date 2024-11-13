@@ -2,7 +2,6 @@ package main
 
 import (
 	"math/rand/v2"
-	"time"
 
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 )
@@ -32,7 +31,7 @@ type Game struct {
 	playerIDs *idPool
 }
 
-func newGame() *Game {
+func newGame(seed int64) *Game {
 	players := make([]Player, MAX_PLAYERS+1)
 	for i := range players {
 		players[i].registered = false
@@ -41,7 +40,7 @@ func newGame() *Game {
 	return &Game{
 		players:   players,
 		generator: newGenerator(MAX_PLAYERS + 1),
-		seed:      time.Now().Unix(),
+		seed:      seed,
 		playerIDs: newIDPool(1),
 	}
 }
@@ -75,7 +74,7 @@ func (g *Game) createInitialInfo() *pb.InitialInfo {
 	return &pb.InitialInfo{
 		Player:           player.toProtoPlayer(),
 		Seed:             g.seed,
-		NextItem:         g.requestItemGenerator(playerID).intoProtoItem(),
+		NextItem:         g.requestItemGenerator(playerID, uint32(g.seed), 0).intoProtoItem(),
 		ConnectedPlayers: connectedPlayers,
 	}
 }
@@ -92,10 +91,18 @@ func (g *Game) removePlayer(playerID uint32) {
 	g.playerIDs.returnID(playerID)
 }
 
+func (g *Game) setPlayer(player Player) {
+	g.players[player.id] = player
+}
+
+func (g *Game) getPlayer(playerID uint32) Player {
+	return g.players[playerID]
+}
+
 func (g *Game) getProtoPlayer(playerID uint32) *pb.Player {
 	return g.players[playerID].toProtoPlayer()
 }
 
-func (g *Game) requestItemGenerator(playerID uint32) *Item {
-	return g.generator.requestItemGenerator(playerID)
+func (g *Game) requestItemGenerator(playerID uint32, nextUint uint32, nextFloat float32) *Item {
+	return g.generator.requestItemGenerator(playerID, nextUint, nextFloat)
 }
