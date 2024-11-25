@@ -115,6 +115,7 @@ func (a *AIAlgorithm) ClearGraph() {
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
+		//log.Printf("Adding player %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", player.X, player.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
 		(*a.graph)[int(player.Y)-a.offsetHeight][int(player.X)-a.offsetWidth] = Cell{&vec2.T{0, 0}, MIN}
 	}
 }

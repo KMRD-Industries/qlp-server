@@ -29,13 +29,17 @@ const (
 	PLAYER_MAX_ID   = 10
 	ENEMY_MIN_ID    = PLAYER_MAX_ID + 1
 	ENEMY_MAX_ID    = ENEMY_MIN_ID + 100
+	ITEM_MIN_ID     = ENEMY_MAX_ID + 1
+	ITEM_MAX_ID     = ITEM_MIN_ID + 100
 )
 
 var (
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
-	lock      = sync.RWMutex{}
+	game      = newGame()
+	gameLock  = sync.Mutex{}
+	connLock  = sync.RWMutex{}
 	playerIds = newIDPool(PLAYER_MIN_ID, PLAYER_MAX_ID)
 	enemyIds  = newIDPool(ENEMY_MIN_ID, ENEMY_MAX_ID)
 
@@ -51,7 +55,15 @@ var (
 	isGraph           = false
 )
 
-func listenConnectionUpdates() {
+func listenTCP() {
+	stateUpdate := &pb.StateUpdate{
+		Player: &pb.Player{
+			Id: 0,
+		},
+		Variant: pb.StateVariant_CONNECTED,
+	}
+	prefix := &pb.BytePrefix{}
+
 	addr := net.TCPAddr{
 		IP:   ip,
 		Port: SERVER_PORT,
@@ -67,24 +79,28 @@ func listenConnectionUpdates() {
 
 	for {
 		conn, err := listener.AcceptTCP()
-		id := playerIds.getID()
 
 		if err != nil {
 			log.Printf("Failed to accept tcp connection: %v\n", err)
 		} else {
-			stateUpdate := &pb.StateUpdate{
-				Id:      id,
-				Variant: pb.StateVariant_CONNECTED,
-			}
+			gameLock.Lock()
+			initialInfo := game.createInitialInfo()
+			id := initialInfo.Player.Id
+			stateUpdate.Player = game.getProtoPlayer(id)
+			gameLock.Unlock()
 
-			connectedPlayers := make([]uint32, 0, 8)
-			lock.Lock()
+			// create message with prefix byte length of update
+			// and the update itself
+			bs, _ := proto.Marshal(stateUpdate)
+			prefix.Bytes = uint32(len(bs))
+			bp, _ := proto.Marshal(prefix)
+			encoded := append(bp, bs...)
+
+			connLock.Lock()
 			for otherID, c := range tcpConns {
-				// collect connected players
-				connectedPlayers = append(connectedPlayers, otherID)
+				log.Printf("comm: %d %d\n", id, otherID)
 
 				// inform connected players of new one
-				encoded, _ := proto.Marshal(stateUpdate)
 				//TODO przemyśl co się stanie w przypadku jak gracz się rozłączy i będzie próbował ponownie dołączyć
 				// jak mu wrogów wysyłać
 				c.Write(encoded)
@@ -92,17 +108,11 @@ func listenConnectionUpdates() {
 
 			// these will be monitored (we're assuming that closing conn means losing connection)
 			tcpConns[id] = conn
-			lock.Unlock()
+			connLock.Unlock()
 
 			// TODO dodać flagę z do spawnu potworów i w zależności od flagi odsyłać odpowiednie info, ręcznie usuwać spawnery jak zrespie potwory
 			// inform player of current game state
-			gameState := &pb.GameState{
-				PlayerId:         id,
-				Seed:             seed,
-				ConnectedPlayers: connectedPlayers,
-			}
-
-			encoded, _ := proto.Marshal(gameState)
+			encoded, _ = proto.Marshal(initialInfo)
 			log.Printf("connected: %d\n", id)
 
 			conn.Write(encoded)
@@ -111,10 +121,11 @@ func listenConnectionUpdates() {
 }
 
 func handleTCP(ch chan uint32) {
-	b := make([]byte, BUF_SIZE)
+	stateUpdate := &pb.StateUpdate{}
+	prefix := &pb.BytePrefix{}
 
 	for {
-		lock.RLock()
+		connLock.RLock()
 		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
 			reader := bufio.NewReaderSize(conn, 8192)
@@ -123,8 +134,37 @@ func handleTCP(ch chan uint32) {
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
-				log.Println(err)
-				handlePlayerDisconnect(id)
+
+				gameLock.Lock()
+				game.removePlayer(id)
+				gameLock.Unlock()
+
+				msg := &pb.StateUpdate{
+					Player:  &pb.Player{Id: id},
+					Variant: pb.StateVariant_DISCONNECTED,
+				}
+
+				for otherID, c := range tcpConns {
+					if otherID != id {
+						bs, _ := proto.Marshal(msg)
+						prefix.Bytes = uint32(len(bs))
+						bp, _ := proto.Marshal(prefix)
+
+						encoded := append(bp, bs...)
+
+						c.Write(encoded)
+					}
+				}
+				log.Printf("disconnected %d\n", id)
+
+				connLock.RUnlock()
+				connLock.Lock()
+				if conn, ok := tcpConns[id]; ok {
+					conn.Close()
+					delete(tcpConns, id)
+				}
+				connLock.Unlock()
+				connLock.RLock()
 			}
 
 			if err != nil {
@@ -143,8 +183,9 @@ func handleTCP(ch chan uint32) {
 			}
 
 			messageBuffer := make([]byte, size)
-			n, err := io.ReadFull(reader, messageBuffer)
-
+			// n - ilość odczytanych bytów z messageBuffera
+			//n, err := io.ReadFull(reader, messageBuffer)
+			_, err = io.ReadFull(reader, messageBuffer)
 			if err == nil {
 				var msg pb.StateUpdate
 				err = proto.Unmarshal(messageBuffer, &msg)
@@ -159,12 +200,16 @@ func handleTCP(ch chan uint32) {
 				}
 
 				switch msg.Variant {
-				case pb.StateVariant_DISCONNECTED:
-					for otherID, otherConn := range tcpConns {
-						if id != otherID {
-							otherConn.Write(b[:n])
-						}
-					}
+				case pb.StateVariant_REQUEST_ITEM_GENERATOR:
+					gameLock.Lock()
+					stateUpdate.Item = game.requestItemGenerator(stateUpdate.Player.Id).intoProtoItem()
+					gameLock.Unlock()
+					bs, _ := proto.Marshal(stateUpdate)
+					prefix.Bytes = uint32(len(bs))
+					bp, _ := proto.Marshal(prefix)
+					encoded := append(bp, bs...)
+
+					conn.Write(encoded)
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
 					//TODO idzie tyle updatów ile graczy bo room change nie jest wysyłany przy zmianie poziomu
 					// wywołanie MoveDownDungeon po stronie kilenta
@@ -176,29 +221,108 @@ func handleTCP(ch chan uint32) {
 					if !isSpawned {
 						handleSpawnEnemyRequest(msg.EnemyPositionsUpdate.EnemyPositions)
 					}
-					handleSendSpawnedEnemies(msg.Id)
+					handleSendSpawnedEnemies()
+				default:
+					//for otherID, otherConn := range tcpConns {
+					//	if id != otherID {
+					//		// n odczytane z readFull
+					//		prefix.Bytes = uint32(n)
+					//		bp, _ := proto.Marshal(prefix)
+					//		// co to kurwa w ogóle znaczy po co jest w ogóle default
+					//		encoded := append(bp, messageBuffer...)
+					//
+					//		otherConn.Write(encoded)
+					//	}
+					//}
 				}
 				continue
 			}
-
 		}
-		lock.RUnlock()
+		connLock.RUnlock()
 	}
 }
 
-func handleSendSpawnedEnemies(msgId uint32) {
+func handleUDP(ch chan uint32) {
+	addr := net.UDPAddr{
+		Port: SERVER_PORT,
+		IP:   ip,
+	}
+	b := make([]byte, BUF_SIZE)
+
+	conn, err := net.ListenUDP("udp", &addr)
+
+	if err != nil {
+		log.Printf("Failed to open udp socket: %v\n", err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		n, sender, err := conn.ReadFromUDP(b)
+
+		select {
+		case id := <-ch:
+			delete(addrPorts, id)
+		default:
+		}
+
+		if err == nil {
+			msg := &pb.StateUpdate{}
+
+			err = proto.Unmarshal(b[:n], msg)
+			if err != nil {
+				log.Printf("Failed to deserialize: %v\n", err)
+				continue
+			}
+
+			switch msg.Variant {
+			case pb.StateVariant_PLAYER_POSITION_UPDATE:
+				positionUpdate := msg.MovementUpdate
+				senderAddrPort := sender.AddrPort()
+				id := positionUpdate.EntityId
+
+				connLock.RLock()
+				// skip packets from disconnected player
+				if _, ok := tcpConns[id]; !ok {
+					continue
+				}
+				connLock.RUnlock()
+
+				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
+					addrPorts[id] = senderAddrPort
+				}
+
+				// pass update to other players
+				for otherID, addrPort := range addrPorts {
+					if otherID != id {
+						udpAddr := net.UDPAddrFromAddrPort(addrPort)
+						conn.WriteToUDP(b[:n], udpAddr)
+					}
+				}
+			case pb.StateVariant_MAP_UPDATE:
+				//log.Println(isGraph)
+				if isGraph {
+					handleMapUpdate(msg, conn)
+				}
+			}
+		}
+	}
+}
+
+func handleSendSpawnedEnemies() {
 	spawnedEnemies := make([]*pb.Enemy, 0, len(enemies))
 	for _, enemy := range enemies {
 		textureData := enemy.GetTextureData()
 		collisionData := enemy.GetCollisionData()
 		protoEnemy := &pb.Enemy{
-			Id:     enemy.GetId(),
-			X:      enemy.GetPosition().X * SCALLING_FACTOR,
-			Y:      enemy.GetPosition().Y * SCALLING_FACTOR,
-			Type:   enemy.GetType(),
-			Name:   enemy.GetName(),
-			Hp:     enemy.GetHp(),
-			Damage: enemy.GetDamage(),
+			Id:        enemy.GetId(),
+			PositionX: enemy.GetPosition().X * SCALLING_FACTOR,
+			PositionY: enemy.GetPosition().Y * SCALLING_FACTOR,
+			Type:      enemy.GetType(),
+			Name:      enemy.GetName(),
+			Hp:        enemy.GetHp(),
+			Damage:    enemy.GetDamage(),
 			TextureData: &pb.TextureData{
 				TileId:    textureData.TileID,
 				TileSet:   textureData.TileSet,
@@ -218,7 +342,6 @@ func handleSendSpawnedEnemies(msgId uint32) {
 	spawnedEnemiesMsg := &pb.EnemyPositionsUpdate{EnemyPositions: spawnedEnemies}
 
 	responseMsg := &pb.StateUpdate{
-		Id:                   msgId,
 		Variant:              pb.StateVariant_SPAWN_ENEMY_REQUEST,
 		EnemyPositionsUpdate: spawnedEnemiesMsg,
 	}
@@ -228,11 +351,20 @@ func handleSendSpawnedEnemies(msgId uint32) {
 		log.Printf("Failed to serialize enemy spawn request response, err: %s\n", err)
 	}
 
+	prefix := &pb.BytePrefix{}
+	prefix.Bytes = uint32(len(serializedMsg))
+	serializedMsgSize, _ := proto.Marshal(prefix)
+	log.Printf("Prefix size: %d\n", len(serializedMsgSize))
+	encoded := append(serializedMsgSize, serializedMsg...)
+
 	for playerId, conn := range tcpConns {
 		log.Printf("Sent spawned enemies to player %d\n", playerId)
-		conn.Write(serializedMsg)
+		_, err2 := conn.Write(encoded)
+		if err2 != nil {
+			log.Printf("Couldn't send spawned enmies to the client, err: %s\n", err2)
+		}
 	}
-	log.Println("-------------------------------")
+	log.Printf("Spawned ememies message size: %d\n-------------------------------\n", len(serializedMsg))
 }
 
 func handleRoomChange(msg *pb.StateUpdate, id uint32) {
@@ -244,19 +376,23 @@ func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 	isSpawned = false
 
 	responseMsg := pb.StateUpdate{
-		Id:      msg.Id,
 		Variant: pb.StateVariant_ROOM_CHANGED,
 		Room:    msg.Room,
 	}
 
 	serializedMsg, err := proto.Marshal(&responseMsg)
+
+	prefix := &pb.BytePrefix{}
+	prefix.Bytes = uint32(len(serializedMsg))
+	serializedMsgSize, _ := proto.Marshal(prefix)
 	if err != nil {
 		fmt.Errorf("failed to serialize enemy spawn request response, err: %s\n", err)
 	}
+	encoded := append(serializedMsgSize, serializedMsg...)
 
 	for otherID, otherConn := range tcpConns {
 		if id != otherID {
-			otherConn.Write(serializedMsg)
+			otherConn.Write(encoded)
 		}
 	}
 }
@@ -307,37 +443,10 @@ func decompressMessage(update []byte) []byte {
 
 func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
 	return &pb.Enemy{
-		Id: enemy.GetId(),
-		X:  enemy.GetDirectionX(),
-		Y:  enemy.GetDirectionY(),
+		Id:        enemy.GetId(),
+		PositionX: enemy.GetDirectionX(),
+		PositionY: enemy.GetDirectionY(),
 	}
-}
-
-func handlePlayerDisconnect(id uint32) {
-	delete(players, id)
-	algorithm.SetPlayers(players)
-
-	msg := &pb.StateUpdate{Id: id,
-		Variant: pb.StateVariant_DISCONNECTED}
-
-	for otherID, c := range tcpConns {
-		if otherID != id {
-			encoded, _ := proto.Marshal(msg)
-			c.Write(encoded)
-		}
-	}
-	log.Printf("disconnected %d\n", id)
-
-	playerIds.returnID(id)
-
-	lock.RUnlock()
-	lock.Lock()
-	if conn, ok := tcpConns[id]; ok {
-		conn.Close()
-		delete(tcpConns, id)
-	}
-	lock.Unlock()
-	lock.RLock()
 }
 
 func handleSpawnEnemyRequest(enemiesToSpawn []*pb.Enemy) {
@@ -357,8 +466,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
-		enemyToSpawn.X/SCALLING_FACTOR,
-		enemyToSpawn.Y/SCALLING_FACTOR,
+		enemyToSpawn.PositionX/SCALLING_FACTOR,
+		enemyToSpawn.PositionY/SCALLING_FACTOR,
 		enemyConfig.Type,
 		enemyConfig.Name,
 		enemyConfig.HP,
@@ -366,7 +475,7 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 		enemyConfig.TextureData,
 		enemyConfig.CollisionData,
 	)
-	log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.X, enemyToSpawn.Y, enemyConfig.HP)
+	log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.PositionX, enemyToSpawn.PositionY, enemyConfig.HP)
 
 	return newEnemyId
 }
@@ -375,74 +484,6 @@ func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
 		X: float32(obstacle.Left / SCALLING_FACTOR),
 		Y: float32(obstacle.Top / SCALLING_FACTOR),
-	}
-}
-
-func handleUDP(ch chan uint32) {
-	addr := net.UDPAddr{
-		Port: SERVER_PORT,
-		IP:   ip,
-	}
-	b := make([]byte, BUF_SIZE)
-
-	conn, err := net.ListenUDP("udp", &addr)
-
-	if err != nil {
-		log.Printf("Failed to open udp socket: %v\n", err)
-		return
-	}
-	defer conn.Close()
-
-	for {
-		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
-		n, sender, err := conn.ReadFromUDP(b)
-
-		select {
-		case id := <-ch:
-			delete(addrPorts, id)
-		default:
-		}
-
-		if err == nil {
-			msg := &pb.StateUpdate{}
-
-			err = proto.Unmarshal(b[:n], msg)
-			if err != nil {
-				log.Printf("Failed to deserialize: %v\n", err)
-				continue
-			}
-
-			switch msg.Variant {
-			case pb.StateVariant_PLAYER_POSITION_UPDATE:
-				positionUpdate := msg.PositionUpdate
-
-				senderAddrPort := sender.AddrPort()
-				id := positionUpdate.EntityId
-
-				lock.RLock()
-				// skip packets from disconnected player
-				if _, ok := tcpConns[id]; !ok {
-					continue
-				}
-				lock.RUnlock()
-
-				if val, ok := addrPorts[id]; !ok || val != senderAddrPort {
-					addrPorts[id] = senderAddrPort
-				}
-
-				// pass update to other players
-				for otherID, addrPort := range addrPorts {
-					if otherID != id {
-						udpAddr := net.UDPAddrFromAddrPort(addrPort)
-						conn.WriteToUDP(b[:n], udpAddr)
-					}
-				}
-			case pb.StateVariant_MAP_UPDATE:
-				if isGraph {
-					handleMapUpdate(msg, conn)
-				}
-			}
-		}
 	}
 }
 
@@ -472,7 +513,6 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 	}
 
 	responseMsg := &pb.StateUpdate{
-		Id:                   msg.Id,
 		Variant:              pb.StateVariant_MAP_UPDATE,
 		EnemyPositionsUpdate: enemyPositionsUpdate,
 	}
@@ -492,8 +532,8 @@ func addPlayers(playersProto []*pb.Player) {
 	//TODO napraw handlowanie tego że plpayer się rozłącza i dalej jest dodawany do grafu
 	for _, player := range playersProto {
 		players[player.GetId()] = g.Coordinate{
-			X:      player.X / SCALLING_FACTOR,
-			Y:      player.Y / SCALLING_FACTOR,
+			X:      player.PositionX / SCALLING_FACTOR,
+			Y:      player.PositionY / SCALLING_FACTOR,
 			Height: 0,
 			Width:  0,
 		}
@@ -505,7 +545,7 @@ func addEnemies(enemiesProto []*pb.Enemy) {
 		//TODO sprawdź czy enemies jest puste
 		enemyOnBoard := enemies[enemy.GetId()]
 		if enemyOnBoard != nil {
-			enemies[enemy.GetId()].SetPosition(enemy.GetX()/SCALLING_FACTOR, enemy.GetY()/SCALLING_FACTOR)
+			enemies[enemy.GetId()].SetPosition(enemy.PositionX/SCALLING_FACTOR, enemy.PositionY/SCALLING_FACTOR)
 		}
 	}
 }
@@ -518,7 +558,7 @@ func main() {
 	}
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
-	go listenConnectionUpdates()
+	go listenTCP()
 	go handleTCP(ch)
 
 	for {
