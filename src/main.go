@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"io"
 	"log"
 	"net"
@@ -20,6 +21,7 @@ const (
 )
 
 var (
+	ipString  = flag.String("a", "127.0.0.1", "server ip address")
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
@@ -95,7 +97,7 @@ func listenTCP() {
 func handleTCP(ch chan uint32) {
 	bs := make([]byte, BUF_SIZE)
 
-	stateUpdate := &pb.StateUpdate{}
+	updateSeries := &pb.StateUpdateSeries{}
 	prefix := &pb.BytePrefix{}
 
 	for {
@@ -105,33 +107,36 @@ func handleTCP(ch chan uint32) {
 			n, err := conn.Read(bs)
 
 			if err == nil {
-				err = proto.Unmarshal(bs[:n], stateUpdate)
+				err = proto.Unmarshal(bs[:n], updateSeries)
 				if err != nil {
 					log.Printf("Failed to deserialize state update: %v\n", err)
 					continue
 				}
-				log.Printf("state update: %v\n", stateUpdate)
 
-				switch stateUpdate.Variant {
-				case pb.StateVariant_REQUEST_ITEM_GENERATOR:
-					gameLock.Lock()
-					stateUpdate.Item = g.requestItemGenerator(stateUpdate.Player.Id).intoProtoItem()
-					gameLock.Unlock()
-					bs, _ := proto.Marshal(stateUpdate)
-					prefix.Bytes = uint32(len(bs))
-					bp, _ := proto.Marshal(prefix)
-					encoded := append(bp, bs...)
+				for _, update := range updateSeries.GetUpdates() {
+					log.Printf("state update: %v\n", update)
 
-					conn.Write(encoded)
-				default:
-					for otherID, otherConn := range tcpConns {
-						if id != otherID {
-							prefix.Bytes = uint32(n)
-							bp, _ := proto.Marshal(prefix)
+					switch update.Variant {
+					case pb.StateVariant_REQUEST_ITEM_GENERATOR:
+						gameLock.Lock()
+						update.Item = g.requestItemGenerator(update.Player.Id).intoProtoItem()
+						gameLock.Unlock()
+						bs, _ := proto.Marshal(update)
+						prefix.Bytes = uint32(len(bs))
+						bp, _ := proto.Marshal(prefix)
+						encoded := append(bp, bs...)
 
-							encoded := append(bp, bs[:n]...)
+						conn.Write(encoded)
+					default:
+						for otherID, otherConn := range tcpConns {
+							if id != otherID {
+								bs, _ := proto.Marshal(update)
+								prefix.Bytes = uint32(len(bs))
+								bp, _ := proto.Marshal(prefix)
+								encoded := append(bp, bs...)
 
-							otherConn.Write(encoded)
+								otherConn.Write(encoded)
+							}
 						}
 					}
 				}
@@ -168,6 +173,12 @@ func handleTCP(ch chan uint32) {
 				if conn, ok := tcpConns[id]; ok {
 					conn.Close()
 					delete(tcpConns, id)
+				}
+
+				if len(tcpConns) == 0 {
+					gameLock.Lock()
+					g = newGame()
+					gameLock.Unlock()
 				}
 				connLock.Unlock()
 				connLock.RLock()
@@ -238,6 +249,14 @@ func handleUDP(ch chan uint32) {
 }
 
 func main() {
+	flag.Parse()
+
+	if parsedIP := net.ParseIP(*ipString); parsedIP != nil {
+		ip = parsedIP
+	}
+
+	log.Printf("Starting server on: %v\n", ip)
+
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
 	go listenTCP()
