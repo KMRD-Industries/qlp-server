@@ -20,7 +20,7 @@ var (
 
 type AIAlgorithm struct {
 	width, height, offsetWidth, offsetHeight       int
-	collisions                                     []Coordinate // pierwsza tablica jest dla współrzędnych, każda tablica reprezentuje jeden blok kolizyjny
+	collisions                                     []Coordinate
 	players                                        map[uint32]Coordinate
 	enemies                                        map[uint32]*Enemy
 	graph                                          *[][]Cell
@@ -207,7 +207,6 @@ func (a *AIAlgorithm) fillDirections() {
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
 		vector := (*a.graph)[int(position.Y)-a.offsetHeight][int(position.X)-a.offsetWidth].direction
-		//log.Printf("ENEMY %d POSITION from fillDirections: x %d, y %d, vector: x %f, y %f\n", enemy.GetId(), position.X, position.Y, vector.Get(1, 0), vector.Get(0, 1))
 		enemy.SetDirection(*vector)
 	}
 }

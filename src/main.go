@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
@@ -23,7 +22,7 @@ import (
 const (
 	MAX_PLAYERS     = 8
 	SERVER_PORT     = 9001
-	BUF_SIZE        = 4096
+	BUF_SIZE        = 8192
 	SCALLING_FACTOR = 10
 	PLAYER_MIN_ID   = 1
 	PLAYER_MAX_ID   = 10
@@ -31,6 +30,7 @@ const (
 	ENEMY_MAX_ID    = ENEMY_MIN_ID + 100
 	ITEM_MIN_ID     = ENEMY_MAX_ID + 1
 	ITEM_MAX_ID     = ITEM_MIN_ID + 100
+	PREFIX_SIZE     = 3
 )
 
 var (
@@ -62,7 +62,6 @@ func listenTCP() {
 		},
 		Variant: pb.StateVariant_CONNECTED,
 	}
-	prefix := &pb.BytePrefix{}
 
 	addr := net.TCPAddr{
 		IP:   ip,
@@ -91,18 +90,14 @@ func listenTCP() {
 
 			// create message with prefix byte length of update
 			// and the update itself
-			bs, _ := proto.Marshal(stateUpdate)
-			prefix.Bytes = uint32(len(bs))
-			bp, _ := proto.Marshal(prefix)
-			encoded := append(bp, bs...)
+			serializedMsg, _ := proto.Marshal(stateUpdate)
+			encoded := addPrefixAndPadding(serializedMsg)
 
 			connLock.Lock()
 			for otherID, c := range tcpConns {
 				log.Printf("comm: %d %d\n", id, otherID)
 
 				// inform connected players of new one
-				//TODO przemyśl co się stanie w przypadku jak gracz się rozłączy i będzie próbował ponownie dołączyć
-				// jak mu wrogów wysyłać
 				c.Write(encoded)
 			}
 
@@ -110,7 +105,6 @@ func listenTCP() {
 			tcpConns[id] = conn
 			connLock.Unlock()
 
-			// TODO dodać flagę z do spawnu potworów i w zależności od flagi odsyłać odpowiednie info, ręcznie usuwać spawnery jak zrespie potwory
 			// inform player of current game state
 			encoded, _ = proto.Marshal(initialInfo)
 			log.Printf("connected: %d\n", id)
@@ -122,15 +116,14 @@ func listenTCP() {
 
 func handleTCP(ch chan uint32) {
 	stateUpdate := &pb.StateUpdate{}
-	prefix := &pb.BytePrefix{}
 
 	for {
 		connLock.RLock()
 		for id, conn := range tcpConns {
 			conn.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
-			reader := bufio.NewReaderSize(conn, 8192)
+			reader := bufio.NewReaderSize(conn, BUF_SIZE)
 
-			_, err := reader.Peek(2)
+			_, err := reader.Peek(PREFIX_SIZE)
 
 			if errors.Is(err, io.EOF) {
 				ch <- id
@@ -146,11 +139,8 @@ func handleTCP(ch chan uint32) {
 
 				for otherID, c := range tcpConns {
 					if otherID != id {
-						bs, _ := proto.Marshal(msg)
-						prefix.Bytes = uint32(len(bs))
-						bp, _ := proto.Marshal(prefix)
-
-						encoded := append(bp, bs...)
+						serializedMsg, _ := proto.Marshal(msg)
+						encoded := addPrefixAndPadding(serializedMsg)
 
 						c.Write(encoded)
 					}
@@ -172,10 +162,23 @@ func handleTCP(ch chan uint32) {
 				continue
 			}
 
-			sizeBuffer := make([]byte, 2)
-			_, err = io.ReadFull(reader, sizeBuffer)
+			//sizeBuffer := make([]byte, 2)
+			//_, err = io.ReadFull(reader, sizeBuffer)
+			//
+			//size := binary.BigEndian.Uint16(sizeBuffer)
+			//_, err = reader.Peek(int(size))
 
-			size := binary.BigEndian.Uint16(sizeBuffer)
+			encodedPrefixMsg := make([]byte, PREFIX_SIZE)
+			_, err = io.ReadFull(reader, encodedPrefixMsg)
+
+			var prefixMsg pb.BytePrefix
+			err = proto.Unmarshal(encodedPrefixMsg, &prefixMsg)
+			if err != nil {
+
+				log.Println("Couldn't unmarshall prefix message, err: ", err)
+			}
+
+			size := prefixMsg.GetBytes()
 			_, err = reader.Peek(int(size))
 			if err != nil {
 				log.Printf("there is not enough bytes to read for this message\nmessage size %d, err: \n", size, err)
@@ -183,14 +186,11 @@ func handleTCP(ch chan uint32) {
 			}
 
 			messageBuffer := make([]byte, size)
-			// n - ilość odczytanych bytów z messageBuffera
-			//n, err := io.ReadFull(reader, messageBuffer)
 			_, err = io.ReadFull(reader, messageBuffer)
 			if err == nil {
 				var msg pb.StateUpdate
 				err = proto.Unmarshal(messageBuffer, &msg)
 				if err != nil {
-					//log.Printf("Failed to deserialize state update, message size: %d, err: %v\n", size, err)
 					continue
 				}
 
@@ -204,15 +204,11 @@ func handleTCP(ch chan uint32) {
 					gameLock.Lock()
 					stateUpdate.Item = game.requestItemGenerator(stateUpdate.Player.Id).intoProtoItem()
 					gameLock.Unlock()
-					bs, _ := proto.Marshal(stateUpdate)
-					prefix.Bytes = uint32(len(bs))
-					bp, _ := proto.Marshal(prefix)
-					encoded := append(bp, bs...)
+					serializedMsg, _ := proto.Marshal(stateUpdate)
+					encoded := addPrefixAndPadding(serializedMsg)
 
 					conn.Write(encoded)
 				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
-					//TODO idzie tyle updatów ile graczy bo room change nie jest wysyłany przy zmianie poziomu
-					// wywołanie MoveDownDungeon po stronie kilenta
 					//TODO dodaj isMapUpdated, żeby kilku playerów nie mogło updatować mapy
 					handleMapDimensionUpdate(msg.CompressedMapDimensionsUpdate)
 				case pb.StateVariant_ROOM_CHANGED:
@@ -223,17 +219,12 @@ func handleTCP(ch chan uint32) {
 					}
 					handleSendSpawnedEnemies()
 				default:
-					//for otherID, otherConn := range tcpConns {
-					//	if id != otherID {
-					//		// n odczytane z readFull
-					//		prefix.Bytes = uint32(n)
-					//		bp, _ := proto.Marshal(prefix)
-					//		// co to kurwa w ogóle znaczy po co jest w ogóle default
-					//		encoded := append(bp, messageBuffer...)
-					//
-					//		otherConn.Write(encoded)
-					//	}
-					//}
+					for otherID, otherConn := range tcpConns {
+						if id != otherID {
+							encoded := addPrefixAndPadding(messageBuffer)
+							otherConn.Write(encoded)
+						}
+					}
 				}
 				continue
 			}
@@ -301,7 +292,6 @@ func handleUDP(ch chan uint32) {
 					}
 				}
 			case pb.StateVariant_MAP_UPDATE:
-				//log.Println(isGraph)
 				if isGraph {
 					handleMapUpdate(msg, conn)
 				}
@@ -351,11 +341,7 @@ func handleSendSpawnedEnemies() {
 		log.Printf("Failed to serialize enemy spawn request response, err: %s\n", err)
 	}
 
-	prefix := &pb.BytePrefix{}
-	prefix.Bytes = uint32(len(serializedMsg))
-	serializedMsgSize, _ := proto.Marshal(prefix)
-	log.Printf("Prefix size: %d\n", len(serializedMsgSize))
-	encoded := append(serializedMsgSize, serializedMsg...)
+	encoded := addPrefixAndPadding(serializedMsg)
 
 	for playerId, conn := range tcpConns {
 		log.Printf("Sent spawned enemies to player %d\n", playerId)
@@ -381,20 +367,36 @@ func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 	}
 
 	serializedMsg, err := proto.Marshal(&responseMsg)
-
-	prefix := &pb.BytePrefix{}
-	prefix.Bytes = uint32(len(serializedMsg))
-	serializedMsgSize, _ := proto.Marshal(prefix)
 	if err != nil {
 		fmt.Errorf("failed to serialize enemy spawn request response, err: %s\n", err)
 	}
-	encoded := append(serializedMsgSize, serializedMsg...)
 
+	encoded := addPrefixAndPadding(serializedMsg)
 	for otherID, otherConn := range tcpConns {
 		if id != otherID {
 			otherConn.Write(encoded)
 		}
 	}
+}
+
+func addPrefixAndPadding(serializedMsg []byte) []byte {
+	prefix := &pb.BytePrefix{}
+	prefix.Bytes = uint32(len(serializedMsg))
+
+	serializedMsgSize, err := proto.Marshal(prefix)
+	if err != nil {
+		fmt.Errorf("failed to serialize enemy spawn request response, err: %s\n", err)
+	}
+
+	if 3-len(serializedMsgSize) >= 0 {
+		padding := make([]byte, 3-len(serializedMsgSize))
+		serializedMsgSize = append(serializedMsgSize, padding...)
+	} else {
+		log.Printf("Prefix is bigger than 3 bytes, acutal size: %d\n", len(serializedMsgSize))
+	}
+
+	log.Printf("Prefix size: %d\n", len(serializedMsgSize))
+	return append(serializedMsgSize, serializedMsg...)
 }
 
 func handleMapDimensionUpdate(update []byte) {
@@ -462,7 +464,6 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	newEnemyId := enemyIds.getID()
 	//TODO jakoś rozwiązać problem z dzieleniem przez scalling factor przeciwników bo jak przesyłam przy spawnie info
 	// to je muszę spowrotem mnożyć xDDDDDDDDDD
-	//TODO na razie tylko potwory typu MELEE będą respione
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
@@ -497,11 +498,8 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 	algorithm.SetPlayers(players)
 	algorithm.SetEnemies(enemies)
 
-	//start := time.Now()
 	algorithm.GetEnemiesUpdate()
 	algorithm.ClearGraph()
-	//elapsed := time.Since(start)
-	//log.Printf("Finished after: %s\n", elapsed)
 
 	enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
 	for _, enemy := range enemies {
