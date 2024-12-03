@@ -1,21 +1,25 @@
 package game_controllers
 
 import (
+	"errors"
 	"fmt"
 	"github.com/ungerik/go3d/vec2"
 	"log"
 	"math"
-	"server/errors"
 )
 
 var (
-	UP        int
-	DOWN      int
-	LEFT      int
-	RIGHT     int
-	IDLE      int
-	COLLISION int
-	MIN       int
+	UP         int
+	DOWN       int
+	LEFT       int
+	RIGHT      int
+	UP_LEFT    int
+	UP_RIGHT   int
+	DOWN_LEFT  int
+	DOWN_RIGHT int
+	IDLE       int
+	COLLISION  int
+	MIN        int
 )
 
 type AIAlgorithm struct {
@@ -58,7 +62,11 @@ func (a *AIAlgorithm) initDirections() {
 	DOWN = UP + 1
 	LEFT = DOWN + 1
 	RIGHT = LEFT + 1
-	IDLE = RIGHT + 1
+	UP_LEFT = RIGHT + 1
+	UP_RIGHT = UP_LEFT + 1
+	DOWN_LEFT = UP_RIGHT + 1
+	DOWN_RIGHT = DOWN_LEFT + 1
+	IDLE = DOWN_RIGHT + 1
 	COLLISION = IDLE + 1
 }
 
@@ -115,14 +123,21 @@ func (a *AIAlgorithm) ClearGraph() {
 
 func (a *AIAlgorithm) addPlayers() {
 	for _, player := range a.players {
-		//log.Printf("Adding player %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", player.X, player.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
-		(*a.graph)[int(player.Y)-a.offsetHeight][int(player.X)-a.offsetWidth] = Cell{&vec2.T{0, 0}, MIN}
+		x := int(player.X) - a.offsetWidth
+		y := int(player.Y) - a.offsetHeight
+		if x < a.width && x >= 0 && y < a.height && y >= 0 {
+			(*a.graph)[y][x] = Cell{&vec2.T{0, 0}, MIN}
+		}
 	}
 }
 
 func (a *AIAlgorithm) addCollisions() {
 	for _, coll := range a.collisions {
-		(*a.graph)[int(coll.Y)-a.offsetHeight][int(coll.X)-a.offsetHeight] = Cell{&vec2.T{0, 0}, COLLISION}
+		x := int(coll.X) - a.offsetWidth
+		y := int(coll.Y) - a.offsetHeight
+		if x < a.width && x >= 0 && y < a.height && y >= 0 {
+			(*a.graph)[y][x] = Cell{&vec2.T{0, 0}, COLLISION}
+		}
 	}
 }
 
@@ -134,23 +149,28 @@ func (a *AIAlgorithm) findBorders() {
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
-		minBorderX = min(minBorderX, int(position.X))
-		minBorderY = min(minBorderY, int(position.Y))
-		maxBorderX = max(maxBorderX, int(position.X))
-		maxBorderY = max(maxBorderY, int(position.Y))
+		//log.Printf("Enemy's position %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", position.X, position.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
+		minBorderX = min(minBorderX, int(position.X)-a.offsetWidth)
+		minBorderY = min(minBorderY, int(position.Y)-a.offsetHeight)
+		maxBorderX = max(maxBorderX, int(position.X)-a.offsetWidth)
+		maxBorderY = max(maxBorderY, int(position.Y)-a.offsetHeight)
 	}
+	//log.Printf("Boarders after enemies update:\nminBorderX: %d\nminBorderY: %d\nmaxBorderX: %d\nmaxBorderY: %d\n", minBorderX, minBorderY, maxBorderX, maxBorderY)
 
 	for _, player := range a.players {
-		minBorderX = min(minBorderX, int(player.X))
-		minBorderY = min(minBorderY, int(player.Y))
-		maxBorderX = max(maxBorderX, int(player.X))
-		maxBorderY = max(maxBorderY, int(player.Y))
+		//log.Printf("Player's position %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", player.X, player.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
+		minBorderX = min(minBorderX, int(player.X)-a.offsetWidth)
+		minBorderY = min(minBorderY, int(player.Y)-a.offsetHeight)
+		maxBorderX = max(maxBorderX, int(player.X)-a.offsetWidth)
+		maxBorderY = max(maxBorderY, int(player.Y)-a.offsetHeight)
 	}
 
-	a.maxBorderX = maxBorderX - a.offsetWidth
-	a.maxBorderY = maxBorderY - a.offsetHeight
-	a.minBorderX = minBorderX - a.offsetWidth
-	a.minBorderY = minBorderY - a.offsetHeight
+	//log.Printf("Boarders after player update:\nminBorderX: %d\nminBorderY: %d\nmaxBorderX: %d\nmaxBorderY: %d\n", minBorderX, minBorderY, maxBorderX, maxBorderY)
+
+	a.maxBorderX = min(a.width-1, maxBorderX)
+	a.maxBorderY = min(a.height-1, maxBorderY)
+	a.minBorderX = max(0, min(minBorderX, a.width-1))
+	a.minBorderY = max(0, min(minBorderY, a.height-1))
 }
 
 // TODO ogranicz wyszukiwanie sąsiadów do najdalej oddalonego wroga i gracza
@@ -173,10 +193,10 @@ func (a *AIAlgorithm) bfs() error {
 
 		current, ok := queue.get()
 		if !ok {
-			return errors.EmptyQueue
+			return errors.New("queue is empty")
 		}
 
-		if int(current.X) >= a.minBorderX && int(current.X) <= a.maxBorderX && int(current.Y) >= a.minBorderY && int(current.Y) <= a.maxBorderY {
+		if int(current.X) >= 0 && int(current.X) < a.width && int(current.Y) >= 0 && int(current.Y) < a.height {
 			neighbors := a.getNeighbors(current)
 			for _, next := range neighbors {
 				found := (*a.graph)[int(next.Y)][int(next.X)]
@@ -207,12 +227,37 @@ func (a *AIAlgorithm) fillDirections() {
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
 		vector := (*a.graph)[int(position.Y)-a.offsetHeight][int(position.X)-a.offsetWidth].direction
-		enemy.SetDirection(*vector)
+		if vector != nil {
+			enemy.SetDirection(*vector)
+		}
 	}
 }
 
 func (a *AIAlgorithm) parseToMove(position Coordinate) *vec2.T {
 	neighbors := a.getNeighbors(position)
+	//x := 0.0
+	//y := 0.0
+
+	// poziome
+	//x += float64((*a.graph)[int(neighbors[LEFT].Y)][int(neighbors[LEFT].X)].value) -
+	//	float64((*a.graph)[int(neighbors[RIGHT].Y)][int(neighbors[RIGHT].X)].value)
+	//
+	//// pionowe
+	//y += float64((*a.graph)[int(neighbors[DOWN].Y)][int(neighbors[DOWN].X)].value) -
+	//	float64((*a.graph)[int(neighbors[UP].Y)][int(neighbors[UP].X)].value)
+	//
+	//// ukośne
+	//x += float64((*a.graph)[int(neighbors[UP_LEFT].Y)][int(neighbors[UP_LEFT].X)].value) -
+	//	float64((*a.graph)[int(neighbors[DOWN_RIGHT].Y)][int(neighbors[DOWN_RIGHT].X)].value)
+	//
+	//y += float64((*a.graph)[int(neighbors[DOWN_RIGHT].Y)][int(neighbors[DOWN_RIGHT].X)].value) -
+	//	float64((*a.graph)[int(neighbors[UP_LEFT].Y)][int(neighbors[UP_LEFT].X)].value)
+	//
+	//x += float64((*a.graph)[int(neighbors[UP_RIGHT].Y)][int(neighbors[UP_RIGHT].X)].value) -
+	//	float64((*a.graph)[int(neighbors[DOWN_LEFT].Y)][int(neighbors[DOWN_LEFT].X)].value)
+	//
+	//y += float64((*a.graph)[int(neighbors[DOWN_LEFT].Y)][int(neighbors[DOWN_LEFT].X)].value) -
+	//	float64((*a.graph)[int(neighbors[UP_RIGHT].Y)][int(neighbors[UP_RIGHT].X)].value)
 	x := (*a.graph)[int(neighbors[LEFT].Y)][int(neighbors[LEFT].X)].value - (*a.graph)[int(neighbors[RIGHT].Y)][int(neighbors[RIGHT].X)].value
 	y := (*a.graph)[int(neighbors[DOWN].Y)][int(neighbors[DOWN].X)].value - (*a.graph)[int(neighbors[UP].Y)][int(neighbors[UP].X)].value
 
@@ -227,6 +272,22 @@ func (a *AIAlgorithm) getNeighbors(vertex Coordinate) map[int]Coordinate {
 		DOWN:  {X: vertex.X, Y: min(float32(a.height-1), vertex.Y+1)},
 		RIGHT: {X: min(float32(a.width-1), vertex.X+1), Y: vertex.Y},
 	}
+}
+
+func (a *AIAlgorithm) getNeighborsExtended(vertex Coordinate) map[int]Coordinate {
+	neighbors := make(map[int]Coordinate)
+
+	neighbors[UP] = Coordinate{X: vertex.X, Y: max(0, vertex.Y-1)}
+	neighbors[LEFT] = Coordinate{X: max(0, vertex.X-1), Y: vertex.Y}
+	neighbors[DOWN] = Coordinate{X: vertex.X, Y: min(float32(a.height-1), vertex.Y+1)}
+	neighbors[RIGHT] = Coordinate{X: min(float32(a.width-1), vertex.X+1), Y: vertex.Y}
+
+	neighbors[UP_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: max(0, vertex.Y-1)}
+	neighbors[UP_RIGHT] = Coordinate{X: min(float32(a.width-1), vertex.X+1), Y: max(0, vertex.Y-1)}
+	neighbors[DOWN_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: min(float32(a.height-1), vertex.Y+1)}
+	neighbors[DOWN_RIGHT] = Coordinate{X: min(float32(a.width-1), vertex.X+1), Y: min(float32(a.height-1), vertex.Y+1)}
+
+	return neighbors
 }
 
 func (a *AIAlgorithm) SetWidth(width int) {

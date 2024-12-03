@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"errors"
+	"flag"
 	"fmt"
 	pb "github.com/kmrd-industries/qlp-proto-bindings/gen/go"
 	"google.golang.org/protobuf/proto"
@@ -34,16 +35,14 @@ const (
 )
 
 var (
+	ipString  = flag.String("a", "127.0.0.1", "server ip address")
 	ip        = net.ParseIP("127.0.0.1")
 	addrPorts = make(map[uint32]netip.AddrPort, MAX_PLAYERS+1)
 	tcpConns  = make(map[uint32]*net.TCPConn, MAX_PLAYERS+1)
 	game      = newGame()
 	gameLock  = sync.Mutex{}
 	connLock  = sync.RWMutex{}
-	playerIds = newIDPool(PLAYER_MIN_ID, PLAYER_MAX_ID)
 	enemyIds  = newIDPool(ENEMY_MIN_ID, ENEMY_MAX_ID)
-
-	seed = time.Now().Unix()
 
 	collisions        = make([]g.Coordinate, 0)
 	enemies           = make(map[uint32]*g.Enemy)
@@ -115,7 +114,7 @@ func listenTCP() {
 }
 
 func handleTCP(ch chan uint32) {
-	stateUpdate := &pb.StateUpdate{}
+	updateSeries := &pb.StateUpdateSeries{}
 
 	for {
 		connLock.RLock()
@@ -153,6 +152,12 @@ func handleTCP(ch chan uint32) {
 					conn.Close()
 					delete(tcpConns, id)
 				}
+
+				if len(tcpConns) == 0 {
+					gameLock.Lock()
+					game = newGame()
+					gameLock.Unlock()
+				}
 				connLock.Unlock()
 				connLock.RLock()
 			}
@@ -188,45 +193,48 @@ func handleTCP(ch chan uint32) {
 			messageBuffer := make([]byte, size)
 			_, err = io.ReadFull(reader, messageBuffer)
 			if err == nil {
-				var msg pb.StateUpdate
-				err = proto.Unmarshal(messageBuffer, &msg)
+				err = proto.Unmarshal(messageBuffer, updateSeries)
 				if err != nil {
 					continue
 				}
 
-				//debugging
-				if msg.Variant != pb.StateVariant_MAP_UPDATE && msg.Variant != pb.StateVariant_NONE {
-					log.Printf("Message Variant: %s\n", msg.Variant)
-				}
+				for _, update := range updateSeries.GetUpdates() {
+					log.Printf("state update: %v\n", update)
 
-				switch msg.Variant {
-				case pb.StateVariant_REQUEST_ITEM_GENERATOR:
-					gameLock.Lock()
-					stateUpdate.Item = game.requestItemGenerator(stateUpdate.Player.Id).intoProtoItem()
-					gameLock.Unlock()
-					serializedMsg, _ := proto.Marshal(stateUpdate)
-					encoded := addPrefixAndPadding(serializedMsg)
-
-					conn.Write(encoded)
-				case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
-					//TODO dodaj isMapUpdated, żeby kilku playerów nie mogło updatować mapy
-					handleMapDimensionUpdate(msg.CompressedMapDimensionsUpdate)
-				case pb.StateVariant_ROOM_CHANGED:
-					handleRoomChange(&msg, id)
-				case pb.StateVariant_SPAWN_ENEMY_REQUEST:
-					if !isSpawned {
-						handleSpawnEnemyRequest(msg.EnemyPositionsUpdate.EnemyPositions)
+					//debugging
+					if update.Variant != pb.StateVariant_MAP_UPDATE && update.Variant != pb.StateVariant_NONE {
+						log.Printf("Message Variant: %s\n", update.Variant)
 					}
-					handleSendSpawnedEnemies()
-				default:
-					for otherID, otherConn := range tcpConns {
-						if id != otherID {
-							encoded := addPrefixAndPadding(messageBuffer)
-							otherConn.Write(encoded)
+
+					switch update.Variant {
+					case pb.StateVariant_REQUEST_ITEM_GENERATOR:
+						gameLock.Lock()
+						update.Item = game.requestItemGenerator(update.Player.Id).intoProtoItem()
+						gameLock.Unlock()
+						serializedMsg, _ := proto.Marshal(update)
+						encoded := addPrefixAndPadding(serializedMsg)
+
+						conn.Write(encoded)
+					case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
+						//TODO dodaj isMapUpdated, żeby kilku playerów nie mogło updatować mapy
+						handleMapDimensionUpdate(update.CompressedMapDimensionsUpdate)
+					case pb.StateVariant_ROOM_CHANGED:
+						handleRoomChange(update, id)
+					case pb.StateVariant_SPAWN_ENEMY_REQUEST:
+						if !isSpawned {
+							handleSpawnEnemyRequest(update.EnemyPositionsUpdate.EnemyPositions)
+						}
+						handleSendSpawnedEnemies()
+					default:
+						for otherID, otherConn := range tcpConns {
+							if id != otherID {
+								encoded := addPrefixAndPadding(messageBuffer)
+								otherConn.Write(encoded)
+							}
 						}
 					}
+					continue
 				}
-				continue
 			}
 		}
 		connLock.RUnlock()
@@ -540,7 +548,6 @@ func addPlayers(playersProto []*pb.Player) {
 
 func addEnemies(enemiesProto []*pb.Enemy) {
 	for _, enemy := range enemiesProto {
-		//TODO sprawdź czy enemies jest puste
 		enemyOnBoard := enemies[enemy.GetId()]
 		if enemyOnBoard != nil {
 			enemies[enemy.GetId()].SetPosition(enemy.PositionX/SCALLING_FACTOR, enemy.PositionY/SCALLING_FACTOR)
@@ -554,6 +561,14 @@ func main() {
 	if err != nil {
 		return
 	}
+	flag.Parse()
+
+	if parsedIP := net.ParseIP(*ipString); parsedIP != nil {
+		ip = parsedIP
+	}
+
+	log.Printf("Starting server on: %v\n", ip)
+
 	ch := make(chan uint32, 32)
 	go handleUDP(ch)
 	go listenTCP()
