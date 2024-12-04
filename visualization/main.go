@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"math"
 	g "server/game-controllers"
 )
@@ -35,12 +34,13 @@ func (s *Simulation) startSimulation() {
 
 	s.algorithm.SetEnemies(s.enemies)
 	s.algorithm.SetPlayers(s.players)
+	s.algorithm.SetCollision(s.collisions)
 
 	s.algorithm.GetEnemiesUpdate()
-	for _, enemy := range s.enemies {
-		position := enemy.GetPosition()
-		fmt.Printf("Enemy's new direction id: %d, position: xpos: %d, ypos: %d, x: %f, y: %f\n", enemy.GetId(), position.X, position.Y, enemy.GetDirectionX(), enemy.GetDirectionY())
-	}
+	//for _, enemy := range s.enemies {
+	//	position := enemy.GetPosition()
+	//	fmt.Printf("Enemy's new direction id: %d, position: xpos: %d, ypos: %d, x: %f, y: %f\n", enemy.GetId(), position.X, position.Y, enemy.GetDirectionX(), enemy.GetDirectionY())
+	//}
 }
 
 func initSimulation(collisions []g.Coordinate, players map[uint32]g.Coordinate, enemies map[uint32]*g.Enemy) *Simulation {
@@ -48,7 +48,6 @@ func initSimulation(collisions []g.Coordinate, players map[uint32]g.Coordinate, 
 	var maxWidth int32 = 0
 	var minHeight int32 = math.MaxInt32
 	var minWidth int32 = math.MaxInt32
-	fmt.Println("Obstacles: ")
 	for _, collision := range collisions {
 		//fmt.Printf("Obstacle: top %d, left: %d, height: %d, width: %d\n", collision.Top, collision.Left, collision.Height, collision.Width)
 		maxHeight = max(maxHeight, int32(collision.Y))
@@ -59,34 +58,41 @@ func initSimulation(collisions []g.Coordinate, players map[uint32]g.Coordinate, 
 	offsetWidth := minWidth
 	offsetHeight := minHeight
 
-	return NewSimulation(int(maxWidth-minWidth)+1, int(maxHeight-minHeight)+1, int(offsetWidth), int(offsetHeight), collisions, players, enemies)
+	return NewSimulation(12, 12, int(offsetWidth), int(offsetHeight), collisions, players, enemies)
 }
 
 func main() {
-	collisions := []g.Coordinate{{7, 7, 0, 0}, {0, 0, 0, 0}}
-	players := map[uint32]g.Coordinate{}
-	players[1] = g.Coordinate{X: 2, Y: 4}
-	enemies := map[uint32]*g.Enemy{}
-	enemy1 := g.NewEnemy(1, 5, 1)
-	enemy2 := g.NewEnemy(2, 7, 3)
-	enemy3 := g.NewEnemy(3, 6, 6)
-	enemy4 := g.NewEnemy(4, 4, 7)
-	enemies[enemy1.GetId()] = enemy1
-	enemies[enemy2.GetId()] = enemy2
-	enemies[enemy3.GetId()] = enemy3
-	enemies[enemy4.GetId()] = enemy4
-
-	//players := []g.Coordinate{{6, 4, 0, 0}}
-	//enemy1 := g.NewEnemy(1, 4, 1)
-	//enemy2 := g.NewEnemy(2, 2, 3)
-	//enemy3 := g.NewEnemy(3, 3, 5)
-	//enemy4 := g.NewEnemy(4, 5, 7)
+	//collisions := []g.Coordinate{{7, 7}, {0, 0}, {3, 4}, {3, 3}, {3, 5}, {3, 2}, {3, 1}, {3, 6}, {3, 0}}
+	//players := map[uint32]g.Coordinate{}
+	//players[1] = g.Coordinate{X: 1, Y: 4}
+	//enemies := map[uint32]*g.Enemy{}
+	//enemy1 := g.NewTestEnemy(1, 5, 1)
+	//enemy2 := g.NewTestEnemy(2, 7, 3)
+	//enemy3 := g.NewTestEnemy(3, 6, 6)
+	//enemy4 := g.NewTestEnemy(4, 4, 7)
 	//enemies[enemy1.GetId()] = enemy1
 	//enemies[enemy2.GetId()] = enemy2
 	//enemies[enemy3.GetId()] = enemy3
 	//enemies[enemy4.GetId()] = enemy4
-	//TODO działa dobrze na 1000x1000 - zrobić optymalizacjie żeby tworzyło mi graf na podstawie gdzie jest najbardziej
-	// oddalony przeciwnik
+
+	//collisions := []g.Coordinate{{0, 4}, {1, 4}, {2, 4}, {3, 4}, {4, 4}, {5, 4}, {5, 3}, {5, 2}, {5, 1}, {5, 0}, {7, 7}}
+	//players := map[uint32]g.Coordinate{}
+	//players[1] = g.Coordinate{X: 7, Y: 1}
+	//enemies := map[uint32]*g.Enemy{}
+	//enemy1 := g.NewTestEnemy(1, 1, 6)
+	//enemies[enemy1.GetId()] = enemy1
+
+	collisions := []g.Coordinate{{0, 0}, {8, 8}, {0, 5}, {1, 5}, {2, 5}, {3, 5}, {4, 5}, {5, 5},
+		{0, 9}, {1, 9}, {2, 9}, {3, 9}, {4, 9}, {5, 9}}
+	//collisions := []g.Coordinate{{2, 7}}
+	players := map[uint32]g.Coordinate{}
+	players[1] = g.Coordinate{X: 0, Y: 7}
+	enemies := map[uint32]*g.Enemy{}
+	enemy1 := g.NewTestEnemy(1, 10, 2)
+	enemies[enemy1.GetId()] = enemy1
+	enemy2 := g.NewTestEnemy(2, 11, 11)
+	enemies[enemy2.GetId()] = enemy2
+
 	sm := initSimulation(collisions, players, enemies)
 	sm.startSimulation()
 }

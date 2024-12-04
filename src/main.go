@@ -24,7 +24,7 @@ const (
 	MAX_PLAYERS     = 8
 	SERVER_PORT     = 9001
 	BUF_SIZE        = 8192
-	SCALLING_FACTOR = 10
+	SCALLING_FACTOR = 16
 	PLAYER_MIN_ID   = 1
 	PLAYER_MAX_ID   = 10
 	ENEMY_MIN_ID    = PLAYER_MAX_ID + 1
@@ -312,8 +312,8 @@ func handleSendSpawnedEnemies() {
 		collisionData := enemy.GetCollisionData()
 		protoEnemy := &pb.Enemy{
 			Id:        enemy.GetId(),
-			PositionX: enemy.GetPosition().X * SCALLING_FACTOR,
-			PositionY: enemy.GetPosition().Y * SCALLING_FACTOR,
+			PositionX: float32(enemy.GetPosition().X) * SCALLING_FACTOR,
+			PositionY: float32(enemy.GetPosition().Y) * SCALLING_FACTOR,
 			Type:      enemy.GetType(),
 			Name:      enemy.GetName(),
 			Hp:        enemy.GetHp(),
@@ -419,7 +419,10 @@ func handleMapDimensionUpdate(update []byte) {
 	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
 	algorithm.SetHeight(int((maxHeight-minHeight)/SCALLING_FACTOR) + 1)
 	algorithm.SetOffset(int(minWidth/SCALLING_FACTOR), int(minHeight/SCALLING_FACTOR))
+
+	algorithm.SetCollision(collisions)
 	algorithm.InitGraph()
+	collisions = make([]g.Coordinate, 0)
 	isGraph = true
 	log.Printf("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
 }
@@ -463,8 +466,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
-		enemyToSpawn.PositionX/SCALLING_FACTOR,
-		enemyToSpawn.PositionY/SCALLING_FACTOR,
+		int(enemyToSpawn.PositionX/SCALLING_FACTOR),
+		int(enemyToSpawn.PositionY/SCALLING_FACTOR),
 		enemyConfig.Type,
 		enemyConfig.Name,
 		enemyConfig.HP,
@@ -479,8 +482,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
-		X: float32(obstacle.Left / SCALLING_FACTOR),
-		Y: float32(obstacle.Top / SCALLING_FACTOR),
+		X: int(obstacle.Left / SCALLING_FACTOR),
+		Y: int(obstacle.Top / SCALLING_FACTOR),
 	}
 }
 
@@ -516,6 +519,7 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 		log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
 	}
 
+	//log.Printf(">>Enemy's vector x: %f, y: %f\n", )
 	for _, addrPort := range addrPorts {
 		udpAddr := net.UDPAddrFromAddrPort(addrPort)
 		conn.WriteToUDP(serializedMsg, udpAddr)
@@ -526,10 +530,8 @@ func addPlayers(playersProto []*pb.Player) {
 	//TODO napraw handlowanie tego że plpayer się rozłącza i dalej jest dodawany do grafu
 	for _, player := range playersProto {
 		players[player.GetId()] = g.Coordinate{
-			X:      player.PositionX / SCALLING_FACTOR,
-			Y:      player.PositionY / SCALLING_FACTOR,
-			Height: 0,
-			Width:  0,
+			X: int(player.PositionX / SCALLING_FACTOR),
+			Y: int(player.PositionY / SCALLING_FACTOR),
 		}
 	}
 }
@@ -538,7 +540,7 @@ func addEnemies(enemiesProto []*pb.Enemy) {
 	for _, enemy := range enemiesProto {
 		enemyOnBoard := enemies[enemy.GetId()]
 		if enemyOnBoard != nil {
-			enemies[enemy.GetId()].SetPosition(enemy.PositionX/SCALLING_FACTOR, enemy.PositionY/SCALLING_FACTOR)
+			enemies[enemy.GetId()].SetPosition(int(enemy.PositionX/SCALLING_FACTOR), int(enemy.PositionY/SCALLING_FACTOR))
 		}
 	}
 }

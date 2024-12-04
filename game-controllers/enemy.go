@@ -15,7 +15,7 @@ type Enemy struct {
 	collisionData u.CollisionData
 }
 
-func NewEnemy(id uint32, x, y float32, typ, name string, hp, damage float64, textureData u.TextureData, collisionData u.CollisionData) *Enemy {
+func NewEnemy(id uint32, x, y int, typ, name string, hp, damage float64, textureData u.TextureData, collisionData u.CollisionData) *Enemy {
 	return &Enemy{
 		id:            id,
 		position:      Coordinate{X: x, Y: y},
@@ -29,12 +29,19 @@ func NewEnemy(id uint32, x, y float32, typ, name string, hp, damage float64, tex
 	}
 }
 
+func NewTestEnemy(id uint32, x, y int) *Enemy {
+	return &Enemy{
+		id:       id,
+		position: Coordinate{x, y},
+	}
+}
+
 func (e *Enemy) GetPosition() Coordinate {
 	return e.position
 }
 
-func (e *Enemy) SetPosition(newX, newY float32) {
-	e.position = Coordinate{newX, newY, 0, 0}
+func (e *Enemy) SetPosition(newX, newY int) {
+	e.position = Coordinate{newX, newY}
 }
 
 func (e *Enemy) GetId() uint32 {
