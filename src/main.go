@@ -32,6 +32,7 @@ const (
 	ITEM_MIN_ID     = ENEMY_MAX_ID + 1
 	ITEM_MAX_ID     = ITEM_MIN_ID + 100
 	PREFIX_SIZE     = 3
+	DIFF            = 4096
 )
 
 var (
@@ -179,14 +180,13 @@ func handleTCP(ch chan uint32) {
 			var prefixMsg pb.BytePrefix
 			err = proto.Unmarshal(encodedPrefixMsg, &prefixMsg)
 			if err != nil {
-
 				log.Println("Couldn't unmarshall prefix message, err: ", err)
 			}
 
-			size := prefixMsg.GetBytes()
+			size := prefixMsg.GetBytes() - DIFF
 			_, err = reader.Peek(int(size))
 			if err != nil {
-				log.Printf("there is not enough bytes to read for this message\nmessage size %d, err: \n", size, err)
+				log.Printf("there is not enough bytes to read for this message\nmessage size %d, err: %v\n", size, err)
 				continue
 			}
 
@@ -200,11 +200,6 @@ func handleTCP(ch chan uint32) {
 
 				for _, update := range updateSeries.GetUpdates() {
 					log.Printf("state update: %v\n", update)
-
-					//debugging
-					if update.Variant != pb.StateVariant_MAP_UPDATE && update.Variant != pb.StateVariant_NONE {
-						log.Printf("Message Variant: %s\n", update.Variant)
-					}
 
 					switch update.Variant {
 					case pb.StateVariant_REQUEST_ITEM_GENERATOR:
@@ -228,7 +223,9 @@ func handleTCP(ch chan uint32) {
 					default:
 						for otherID, otherConn := range tcpConns {
 							if id != otherID {
-								encoded := addPrefixAndPadding(messageBuffer)
+								serializedMsg, _ := proto.Marshal(update)
+								encoded := addPrefixAndPadding(serializedMsg)
+
 								otherConn.Write(encoded)
 							}
 						}
@@ -358,7 +355,6 @@ func handleSendSpawnedEnemies() {
 			log.Printf("Couldn't send spawned enmies to the client, err: %s\n", err2)
 		}
 	}
-	log.Printf("Spawned ememies message size: %d\n-------------------------------\n", len(serializedMsg))
 }
 
 func handleRoomChange(msg *pb.StateUpdate, id uint32) {
@@ -389,22 +385,14 @@ func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 
 func addPrefixAndPadding(serializedMsg []byte) []byte {
 	prefix := &pb.BytePrefix{}
-	prefix.Bytes = uint32(len(serializedMsg))
+	prefix.Bytes = uint32(len(serializedMsg) + DIFF)
 
-	serializedMsgSize, err := proto.Marshal(prefix)
+	serialisedPrefix, err := proto.Marshal(prefix)
 	if err != nil {
 		fmt.Errorf("failed to serialize enemy spawn request response, err: %s\n", err)
 	}
 
-	if 3-len(serializedMsgSize) >= 0 {
-		padding := make([]byte, 3-len(serializedMsgSize))
-		serializedMsgSize = append(serializedMsgSize, padding...)
-	} else {
-		log.Printf("Prefix is bigger than 3 bytes, acutal size: %d\n", len(serializedMsgSize))
-	}
-
-	log.Printf("Prefix size: %d\n", len(serializedMsgSize))
-	return append(serializedMsgSize, serializedMsg...)
+	return append(serialisedPrefix, serializedMsg...)
 }
 
 func handleMapDimensionUpdate(update []byte) {
