@@ -410,10 +410,10 @@ func handleMapDimensionUpdate(update []byte) {
 
 	for _, obstacle := range mapDimensionUpdate.Obstacles {
 		collisions = append(collisions, convertToCollision(obstacle))
-		maxHeight = max(maxHeight, obstacle.Top)
-		maxWidth = max(maxWidth, obstacle.Left)
-		minHeight = min(minHeight, obstacle.Top)
-		minWidth = min(minWidth, obstacle.Left)
+		maxHeight = max(maxHeight, int32(obstacle.Top))
+		maxWidth = max(maxWidth, int32(obstacle.Left))
+		minHeight = min(minHeight, int32(obstacle.Top))
+		minWidth = min(minWidth, int32(obstacle.Left))
 	}
 
 	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
@@ -482,8 +482,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 
 func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	return g.Coordinate{
-		X: int(obstacle.Left / SCALLING_FACTOR),
-		Y: int(obstacle.Top / SCALLING_FACTOR),
+		X: int(math.Ceil(float64(obstacle.Left / SCALLING_FACTOR))),
+		Y: int(math.Ceil(float64(obstacle.Top / SCALLING_FACTOR))),
 	}
 }
 

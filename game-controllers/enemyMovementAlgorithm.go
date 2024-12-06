@@ -29,6 +29,7 @@ type AIAlgorithm struct {
 	enemies                                        map[uint32]*Enemy
 	graph                                          *[][]Cell
 	minBorderX, minBorderY, maxBorderX, maxBorderY int
+	debug                                          bool
 }
 
 type Cell struct {
@@ -86,24 +87,29 @@ func (a *AIAlgorithm) createDistancesMap() {
 		fmt.Println(err)
 	}
 	a.fillDirections()
+	if a.debug {
+		a.debug = false
+		a.printGraphWithAxes()
+	}
 }
 
 func (a *AIAlgorithm) printGraphWithAxes2() {
 	fmt.Print("    ")
 	for i := 0; i < len((*a.graph)[0]); i++ {
-		fmt.Printf("%2d   ", i)
+		fmt.Printf("%2d |", i)
 	}
 	fmt.Print("\n")
 
 	for i, row := range *(a.graph) {
-		fmt.Printf("%2d  ", i)
+		fmt.Printf("%2d ", i)
 		for _, el := range row {
 			if el.value != COLLISION {
-				fmt.Printf("%s||", getDirectionArrow(0, 0))
+				fmt.Printf("%s|", getDirectionArrow(0, 0))
 			} else {
-				fmt.Printf(" C ||")
+				fmt.Printf(" C |")
 				//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
 			}
+
 		}
 		fmt.Print("\n")
 	}
@@ -112,41 +118,32 @@ func (a *AIAlgorithm) printGraphWithAxes2() {
 func (a *AIAlgorithm) printGraphWithAxes() {
 	fmt.Print("    ")
 	for i := 0; i < len((*a.graph)[0]); i++ {
-		fmt.Printf("%2d   ", i)
+		fmt.Printf("%2d |", i)
 	}
 	fmt.Print("\n")
 
+	enemeySpawned := false
 	for i, row := range *(a.graph) {
 		fmt.Printf("%2d  ", i)
-		for _, el := range row {
-			if el.value != COLLISION {
-				fmt.Printf("%s||", getDirectionArrow(float64(el.direction.Get(1, 0)), float64(el.direction.Get(0, 1))))
-			} else {
-				fmt.Printf(" C ||")
-				//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
-			}
-		}
-		fmt.Print("\n")
-	}
-}
-
-func (a *AIAlgorithm) printGraphAroundEnemy(enemyX, enemyY int) {
-	padding := 3
-
-	for padY := -padding; padY <= padding; padY++ {
-		for padX := -padding; padX <= padding; padX++ {
-			newX := enemyX + padX
-			newY := enemyY + padY
-
-			if newX >= 0 && newX < a.width && newY >= 0 && newY < a.height {
-				el := (*a.graph)[newY][newX]
-				if el.value != COLLISION {
-					fmt.Printf("%s||", getDirectionArrow(float64(el.direction.Get(1, 0)), float64(el.direction.Get(0, 1))))
-				} else {
-					fmt.Printf(" C ||")
-					//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
+		for j, el := range row {
+			for _, enemy := range a.enemies {
+				position := enemy.position
+				if position.X-a.offsetWidth == j && position.Y-a.offsetHeight == i {
+					fmt.Printf(" ● |")
+					enemeySpawned = true
 				}
 			}
+			if !enemeySpawned {
+				if el.value != COLLISION && el.direction != nil {
+					fmt.Printf("%s|", getDirectionArrow(float64(el.direction.Get(1, 0)), float64(el.direction.Get(0, 1))))
+				} else if el.value == COLLISION {
+					fmt.Printf(" C |")
+					//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
+				} else {
+					fmt.Printf("%s|", getDirectionArrow(0, 0))
+				}
+			}
+			enemeySpawned = false
 		}
 		fmt.Print("\n")
 	}
@@ -175,6 +172,8 @@ func (a *AIAlgorithm) InitGraph() {
 	log.Printf("Created graph, width: %d, height: %d\n", a.width, a.height)
 	a.expandCollisions()
 	a.addCollisions()
+	a.printGraphWithAxes2()
+	a.debug = true
 }
 
 func (a *AIAlgorithm) ClearGraph() {
@@ -199,13 +198,11 @@ func (a *AIAlgorithm) addPlayers() {
 }
 
 func (a *AIAlgorithm) addCollisions() {
-	cnt := 0
 	//fmt.Printf("Collision length in add collisions: %d\n", len(a.collisions))
 	for _, coll := range a.collisions {
-		x := coll.X
-		y := coll.Y
+		x := coll.X - a.offsetWidth
+		y := coll.Y - a.offsetHeight
 		if x < a.width && x >= 0 && y < a.height && y >= 0 {
-			cnt++
 			//fmt.Printf("adding collision: %d\n", cnt)
 			(*a.graph)[y][x] = Cell{&vec2.T{0, 0}, COLLISION}
 		}
@@ -213,25 +210,25 @@ func (a *AIAlgorithm) addCollisions() {
 }
 
 func (a *AIAlgorithm) expandCollisions() {
-	padding := 1
+	padding := 2
 
 	expandedCollisions := make([]Coordinate, 0)
 
 	for _, coll := range a.collisions {
-		x := coll.X - a.offsetWidth
-		y := coll.Y - a.offsetHeight
+		x := coll.X
+		y := coll.Y
 
 		for dy := -padding; dy <= padding; dy++ {
 			for dx := -padding; dx <= padding; dx++ {
 				newX := x + dx
 				newY := y + dy
 
-				if newX >= 0 && newX < a.width && newY >= 0 && newY < a.height {
-					expandedCollisions = append(expandedCollisions, Coordinate{
-						X: newX,
-						Y: newY,
-					})
-				}
+				//if newX >= 0 && newX < a.width && newY >= 0 && newY < a.height {
+				expandedCollisions = append(expandedCollisions, Coordinate{
+					X: newX,
+					Y: newY,
+				})
+				//}
 			}
 		}
 	}
@@ -312,8 +309,16 @@ func (a *AIAlgorithm) bfs() error {
 }
 
 func (a *AIAlgorithm) fillDirections() {
-	for i := a.minBorderY; i < a.maxBorderY+1; i++ {
-		for j := a.minBorderX; j < a.maxBorderX+1; j++ {
+	//for i := a.minBorderY; i < a.maxBorderY+1; i++ {
+	//	for j := a.minBorderX; j < a.maxBorderX+1; j++ {
+	//		value := (*a.graph)[i][j].value
+	//		if value != MIN && value != COLLISION {
+	//			(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
+	//		}
+	//	}
+	//}
+	for i := 0; i < a.height; i++ {
+		for j := 0; j < a.width; j++ {
 			value := (*a.graph)[i][j].value
 			if value != MIN && value != COLLISION {
 				(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
@@ -323,11 +328,54 @@ func (a *AIAlgorithm) fillDirections() {
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
-		vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
-		if vector != nil {
-			enemy.SetDirection(*vector)
-			//a.printGraphAroundEnemy(position.X-a.offsetWidth, position.Y-a.offsetHeight)
+		//vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
+		y := position.Y - a.offsetHeight
+		x := position.X - a.offsetWidth
+		vector := (*a.graph)[y][x].direction
+
+		if vector == nil {
+			continue
 		}
+
+		vecX := vector[0]
+		vecY := vector[1]
+		if vecX == -1 && vecY == 0 && (*a.graph)[y+3][x-1].value == COLLISION && y%16 > 0 {
+			enemy.SetDirection(vec2.T{0, -1})
+			//a.printGraphAroundEnemy(position.X-a.offsetWidth, position.Y-a.offsetHeight)
+		} else if vecX == 0 && vecY == -1 && (*a.graph)[y-1][x+3].value == COLLISION && x%16 > 0 {
+			enemy.SetDirection(vec2.T{-1, 0})
+		} else {
+			enemy.SetDirection(*vector)
+		}
+
+		//if vecX > 0 {
+		//	// prawo góra, prawo, sprawdzamy na prawo dół
+		//	if vecY >= 0 && (*a.graph)[x+3][y+2].value == COLLISION && y%16 > 0 {
+		//		enemy.SetDirection(vec2.T{0, -1})
+		//		// prawo dół, sprawdzamy na prawo góre
+		//	} else if vecY < 0 && (*a.graph)[x][y+3].value == COLLISION {
+		//		enemy.SetDirection(vec2.T{0, 1})
+		//	}
+		//	//else if vecY == 0 && (*a.graph)[x+3][y+2].value == COLLISION {
+		//	//	enemy.SetDirection(vec2.T{1, 0})
+		//	//}
+		//} else if vecX < 0 {
+		//	// lew góra, lewo, sprawdzamy lewo dół
+		//	if vecY <= 0 && (*a.graph)[x-1][y+3].value == COLLISION && y%16 > 0 {
+		//		enemy.SetDirection(vec2.T{0, 1})
+		//		// lew dół, sprawdzamy dół prawo
+		//	} else if vecY > 0 && (*a.graph)[x+2][y+3].value == COLLISION && x%16 > 0 {
+		//		enemy.SetDirection(vec2.T{-1, 0})
+		//	}
+		//} else {
+		//	// dół, sprawdzamy dół prawo
+		//	if vecY >= 0 && (*a.graph)[x+2][y+3].value == COLLISION && x%16 > 0 {
+		//		enemy.SetDirection(vec2.T{-1, 0})
+		//		// góra, sprawdzamy góra prawo
+		//	} else if vecY < 0 && (*a.graph)[x+3][y-1].value == COLLISION && x%16 > 0 {
+		//		enemy.SetDirection(vec2.T{-1, 0})
+		//	}
+		//}
 	}
 }
 

@@ -3,7 +3,7 @@ module server
 go 1.22.1
 
 require (
-	github.com/kmrd-industries/qlp-proto-bindings v0.1.1-0.20241127004349-1372e82a40e5
+	github.com/kmrd-industries/qlp-proto-bindings v0.1.1-0.20241205175248-a94616a966d7
 	github.com/ungerik/go3d v0.0.0-20240502073936-1137f6adf7e9
 	google.golang.org/protobuf v1.34.2
 )
