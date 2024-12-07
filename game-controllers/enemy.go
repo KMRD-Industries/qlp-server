@@ -6,26 +6,29 @@ import (
 )
 
 type Enemy struct {
-	id            uint32
-	position      Coordinate
-	direction     vec2.T
-	typ, name     string
-	hp, damage    float64
-	textureData   u.TextureData
-	collisionData u.CollisionData
+	id                uint32
+	position          Coordinate
+	direction         vec2.T
+	typ, name         string
+	hp, damage        float64
+	textureData       u.TextureData
+	collisionData     u.CollisionData
+	previousDirection vec2.T
+	posX, posY        float32
 }
 
 func NewEnemy(id uint32, x, y int, typ, name string, hp, damage float64, textureData u.TextureData, collisionData u.CollisionData) *Enemy {
 	return &Enemy{
-		id:            id,
-		position:      Coordinate{X: x, Y: y},
-		direction:     vec2.T{0, 0},
-		typ:           typ,
-		name:          name,
-		hp:            hp,
-		damage:        damage,
-		textureData:   textureData,
-		collisionData: collisionData,
+		id:                id,
+		position:          Coordinate{X: x, Y: y},
+		direction:         vec2.T{0, 0},
+		previousDirection: vec2.T{0, 0},
+		typ:               typ,
+		name:              name,
+		hp:                hp,
+		damage:            damage,
+		textureData:       textureData,
+		collisionData:     collisionData,
 	}
 }
 
@@ -64,6 +67,22 @@ func (e *Enemy) SetDirection(direction vec2.T) {
 	e.direction = direction
 }
 
+func (e *Enemy) GetPreviousDirection() vec2.T {
+	return e.previousDirection
+}
+
+func (e *Enemy) GetPreviousDirectionX() float32 {
+	return e.previousDirection.Get(1, 0)
+}
+
+func (e *Enemy) GetPreviousDirectionY() float32 {
+	return e.previousDirection.Get(0, 1)
+}
+
+func (e *Enemy) SetPreviousDirection(direction vec2.T) {
+	e.direction = direction
+}
+
 func (e *Enemy) GetType() string {
 	return e.typ
 }
@@ -86,4 +105,21 @@ func (e *Enemy) GetTextureData() u.TextureData {
 
 func (e *Enemy) GetCollisionData() u.CollisionData {
 	return e.collisionData
+}
+
+func (e *Enemy) SetFloatPosX(posX float32) {
+	e.posX = posX
+}
+
+func (e *Enemy) SetFloatPosY(posY float32) {
+	e.posY = posY
+}
+
+func (e *Enemy) SetFloatPosition(posX, posY float32) {
+	e.posX = posX
+	e.posY = posY
+}
+
+func (e *Enemy) GetFloatPosition() (float32, float32) {
+	return e.posX, e.posY
 }

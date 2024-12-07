@@ -71,10 +71,6 @@ func (a *AIAlgorithm) initDirections() {
 	COLLISION = IDLE + 1
 }
 
-// TODO 1. zrób czyszczenie mapy w takich samych granicach jak wypełnianie vector field
-// TODO 2. potwory się buggują i nie widzą drugiego playera i idą tylko do jednego
-// TODO 3. źle się kolizję wypełniają i potwory wchodzą mi w ścianę
-
 func (a *AIAlgorithm) createDistancesMap() {
 	a.initDirections()
 
@@ -198,12 +194,10 @@ func (a *AIAlgorithm) addPlayers() {
 }
 
 func (a *AIAlgorithm) addCollisions() {
-	//fmt.Printf("Collision length in add collisions: %d\n", len(a.collisions))
 	for _, coll := range a.collisions {
 		x := coll.X - a.offsetWidth
 		y := coll.Y - a.offsetHeight
 		if x < a.width && x >= 0 && y < a.height && y >= 0 {
-			//fmt.Printf("adding collision: %d\n", cnt)
 			(*a.graph)[y][x] = Cell{&vec2.T{0, 0}, COLLISION}
 		}
 	}
@@ -223,12 +217,10 @@ func (a *AIAlgorithm) expandCollisions() {
 				newX := x + dx
 				newY := y + dy
 
-				//if newX >= 0 && newX < a.width && newY >= 0 && newY < a.height {
 				expandedCollisions = append(expandedCollisions, Coordinate{
 					X: newX,
 					Y: newY,
 				})
-				//}
 			}
 		}
 	}
@@ -245,23 +237,18 @@ func (a *AIAlgorithm) findBorders() {
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
-		//log.Printf("Enemy's position %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", position.X, position.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
 		minBorderX = min(minBorderX, position.X-a.offsetWidth)
 		minBorderY = min(minBorderY, position.Y-a.offsetHeight)
 		maxBorderX = max(maxBorderX, position.X-a.offsetWidth)
 		maxBorderY = max(maxBorderY, position.Y-a.offsetHeight)
 	}
-	//log.Printf("Boarders after enemies update:\nminBorderX: %d\nminBorderY: %d\nmaxBorderX: %d\nmaxBorderY: %d\n", minBorderX, minBorderY, maxBorderX, maxBorderY)
 
 	for _, player := range a.players {
-		//log.Printf("Player's position %f, %f\noffset: %d, %d\nmap dimensions: %d, %d\n", player.X, player.Y, a.offsetWidth, a.offsetHeight, a.width, a.height)
 		minBorderX = min(minBorderX, player.X-a.offsetWidth)
 		minBorderY = min(minBorderY, player.Y-a.offsetHeight)
 		maxBorderX = max(maxBorderX, player.X-a.offsetWidth)
 		maxBorderY = max(maxBorderY, player.Y-a.offsetHeight)
 	}
-
-	//log.Printf("Boarders after player update:\nminBorderX: %d\nminBorderY: %d\nmaxBorderX: %d\nmaxBorderY: %d\n", minBorderX, minBorderY, maxBorderX, maxBorderY)
 
 	a.maxBorderX = min(a.width-1, maxBorderX)
 	a.maxBorderY = min(a.height-1, maxBorderY)
@@ -270,7 +257,6 @@ func (a *AIAlgorithm) findBorders() {
 }
 
 // TODO ogranicz wyszukiwanie sąsiadów do najdalej oddalonego wroga i gracza
-// maksymalna/minimalna wartość to właśnie pozycja takiego granicznego wroga/gracza
 func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
 	for _, player := range a.players {
@@ -309,14 +295,6 @@ func (a *AIAlgorithm) bfs() error {
 }
 
 func (a *AIAlgorithm) fillDirections() {
-	//for i := a.minBorderY; i < a.maxBorderY+1; i++ {
-	//	for j := a.minBorderX; j < a.maxBorderX+1; j++ {
-	//		value := (*a.graph)[i][j].value
-	//		if value != MIN && value != COLLISION {
-	//			(*a.graph)[i][j].direction = a.parseToMove(Coordinate{X: j, Y: i})
-	//		}
-	//	}
-	//}
 	for i := 0; i < a.height; i++ {
 		for j := 0; j < a.width; j++ {
 			value := (*a.graph)[i][j].value
@@ -328,9 +306,12 @@ func (a *AIAlgorithm) fillDirections() {
 
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
+
 		//vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
 		y := position.Y - a.offsetHeight
 		x := position.X - a.offsetWidth
+
+		//realX, realY := enemy.GetFloatPosition()
 		vector := (*a.graph)[y][x].direction
 
 		if vector == nil {
@@ -339,43 +320,48 @@ func (a *AIAlgorithm) fillDirections() {
 
 		vecX := vector[0]
 		vecY := vector[1]
-		if vecX == -1 && vecY == 0 && (*a.graph)[y+3][x-1].value == COLLISION && y%16 > 0 {
-			enemy.SetDirection(vec2.T{0, -1})
-			//a.printGraphAroundEnemy(position.X-a.offsetWidth, position.Y-a.offsetHeight)
-		} else if vecX == 0 && vecY == -1 && (*a.graph)[y-1][x+3].value == COLLISION && x%16 > 0 {
-			enemy.SetDirection(vec2.T{-1, 0})
-		} else {
+		previousX := enemy.GetPreviousDirectionX()
+		previousY := enemy.GetPreviousDirectionY()
+		if previousX == 0 && previousY == 0 {
 			enemy.SetDirection(*vector)
+			enemy.SetPreviousDirection(*vector)
+			continue
 		}
 
-		//if vecX > 0 {
-		//	// prawo góra, prawo, sprawdzamy na prawo dół
-		//	if vecY >= 0 && (*a.graph)[x+3][y+2].value == COLLISION && y%16 > 0 {
-		//		enemy.SetDirection(vec2.T{0, -1})
-		//		// prawo dół, sprawdzamy na prawo góre
-		//	} else if vecY < 0 && (*a.graph)[x][y+3].value == COLLISION {
-		//		enemy.SetDirection(vec2.T{0, 1})
-		//	}
-		//	//else if vecY == 0 && (*a.graph)[x+3][y+2].value == COLLISION {
-		//	//	enemy.SetDirection(vec2.T{1, 0})
-		//	//}
-		//} else if vecX < 0 {
-		//	// lew góra, lewo, sprawdzamy lewo dół
-		//	if vecY <= 0 && (*a.graph)[x-1][y+3].value == COLLISION && y%16 > 0 {
-		//		enemy.SetDirection(vec2.T{0, 1})
-		//		// lew dół, sprawdzamy dół prawo
-		//	} else if vecY > 0 && (*a.graph)[x+2][y+3].value == COLLISION && x%16 > 0 {
-		//		enemy.SetDirection(vec2.T{-1, 0})
-		//	}
-		//} else {
-		//	// dół, sprawdzamy dół prawo
-		//	if vecY >= 0 && (*a.graph)[x+2][y+3].value == COLLISION && x%16 > 0 {
-		//		enemy.SetDirection(vec2.T{-1, 0})
-		//		// góra, sprawdzamy góra prawo
-		//	} else if vecY < 0 && (*a.graph)[x+3][y-1].value == COLLISION && x%16 > 0 {
-		//		enemy.SetDirection(vec2.T{-1, 0})
-		//	}
-		//}
+		passedTileX := x
+		passedTileY := y
+		if passedTileX%16 < 2 && passedTileY%16 < 2 {
+			if vecX != 0 && vecY != 0 {
+				canMoveX := (*a.graph)[y][x+int(vecX)].value != COLLISION
+				canMoveY := (*a.graph)[y+int(vecY)][x].value != COLLISION
+				canMoveDiagonal := (*a.graph)[y+int(vecY)][x+int(vecX)].value != COLLISION
+
+				if canMoveX && canMoveY && canMoveDiagonal {
+					enemy.SetDirection(*vector)
+				} else if canMoveX {
+					enemy.SetDirection(vec2.T{vecX, 0})
+				} else if canMoveY {
+					enemy.SetDirection(vec2.T{0, vecY})
+				}
+			} else {
+				enemy.SetDirection(*vector)
+			}
+		} else if passedTileX%16 < 2 {
+			if vecY != 0 {
+				enemy.SetDirection(vec2.T{0, vecY})
+			} else {
+				enemy.SetDirection(vec2.T{previousX, previousY})
+			}
+		} else if passedTileY%16 < 2 {
+			if vecX != 0 {
+				enemy.SetDirection(vec2.T{vecX, 0})
+			} else {
+				enemy.SetDirection(vec2.T{previousX, previousY})
+			}
+		}
+
+		enemy.SetPreviousDirection(enemy.GetDirection())
+
 	}
 }
 
@@ -384,26 +370,6 @@ func (a *AIAlgorithm) parseToMove(vertex Coordinate) *vec2.T {
 	x := 0
 	y := 0
 
-	// poziome
-	//x += float64((*a.graph)[int(neighbors[LEFT].Y)][int(neighbors[LEFT].X)].value) -
-	//	float64((*a.graph)[int(neighbors[RIGHT].Y)][int(neighbors[RIGHT].X)].value)
-	//
-	//// pionowe
-	//y += float64((*a.graph)[int(neighbors[DOWN].Y)][int(neighbors[DOWN].X)].value) -
-	//	float64((*a.graph)[int(neighbors[UP].Y)][int(neighbors[UP].X)].value)
-	//
-	//// ukośne
-	//x += float64((*a.graph)[int(neighbors[UP_LEFT].Y)][int(neighbors[UP_LEFT].X)].value) -
-	//	float64((*a.graph)[int(neighbors[DOWN_RIGHT].Y)][int(neighbors[DOWN_RIGHT].X)].value)
-	//
-	//y += float64((*a.graph)[int(neighbors[DOWN_RIGHT].Y)][int(neighbors[DOWN_RIGHT].X)].value) -
-	//	float64((*a.graph)[int(neighbors[UP_LEFT].Y)][int(neighbors[UP_LEFT].X)].value)
-	//
-	//x += float64((*a.graph)[int(neighbors[UP_RIGHT].Y)][int(neighbors[UP_RIGHT].X)].value) -
-	//	float64((*a.graph)[int(neighbors[DOWN_LEFT].Y)][int(neighbors[DOWN_LEFT].X)].value)
-	//
-	//y += float64((*a.graph)[int(neighbors[DOWN_LEFT].Y)][int(neighbors[DOWN_LEFT].X)].value) -
-	//	float64((*a.graph)[int(neighbors[UP_RIGHT].Y)][int(neighbors[UP_RIGHT].X)].value)
 	if (*a.graph)[neighbors[UP].Y][neighbors[UP].X].value == COLLISION && (*a.graph)[neighbors[DOWN].Y][neighbors[DOWN].X].value == COLLISION {
 		y = 0
 	} else if (*a.graph)[neighbors[UP].Y][neighbors[UP].X].value == COLLISION {

@@ -541,6 +541,7 @@ func addEnemies(enemiesProto []*pb.Enemy) {
 		enemyOnBoard := enemies[enemy.GetId()]
 		if enemyOnBoard != nil {
 			enemies[enemy.GetId()].SetPosition(int(enemy.PositionX/SCALLING_FACTOR), int(enemy.PositionY/SCALLING_FACTOR))
+			enemies[enemy.GetId()].SetFloatPosition(enemy.PositionX, enemy.PositionY)
 		}
 	}
 }
