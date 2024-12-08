@@ -79,7 +79,7 @@ func (e *Enemy) GetPreviousDirectionY() float32 {
 }
 
 func (e *Enemy) SetPreviousDirection(direction vec2.T) {
-	e.direction = direction
+	e.previousDirection = direction
 }
 
 func (e *Enemy) GetType() string {

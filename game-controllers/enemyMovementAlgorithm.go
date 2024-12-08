@@ -71,94 +71,6 @@ func (a *AIAlgorithm) initDirections() {
 	COLLISION = IDLE + 1
 }
 
-func (a *AIAlgorithm) createDistancesMap() {
-	a.initDirections()
-
-	a.addPlayers()
-	a.addCollisions()
-	//a.printGraphWithAxes2()
-	a.findBorders()
-	err := a.bfs()
-	if err != nil {
-		fmt.Println(err)
-	}
-	a.fillDirections()
-	if a.debug {
-		a.debug = false
-		a.printGraphWithAxes()
-	}
-}
-
-func (a *AIAlgorithm) printGraphWithAxes2() {
-	fmt.Print("    ")
-	for i := 0; i < len((*a.graph)[0]); i++ {
-		fmt.Printf("%2d |", i)
-	}
-	fmt.Print("\n")
-
-	for i, row := range *(a.graph) {
-		fmt.Printf("%2d ", i)
-		for _, el := range row {
-			if el.value != COLLISION {
-				fmt.Printf("%s|", getDirectionArrow(0, 0))
-			} else {
-				fmt.Printf(" C |")
-				//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
-			}
-
-		}
-		fmt.Print("\n")
-	}
-}
-
-func (a *AIAlgorithm) printGraphWithAxes() {
-	fmt.Print("    ")
-	for i := 0; i < len((*a.graph)[0]); i++ {
-		fmt.Printf("%2d |", i)
-	}
-	fmt.Print("\n")
-
-	enemeySpawned := false
-	for i, row := range *(a.graph) {
-		fmt.Printf("%2d  ", i)
-		for j, el := range row {
-			for _, enemy := range a.enemies {
-				position := enemy.position
-				if position.X-a.offsetWidth == j && position.Y-a.offsetHeight == i {
-					fmt.Printf(" ● |")
-					enemeySpawned = true
-				}
-			}
-			if !enemeySpawned {
-				if el.value != COLLISION && el.direction != nil {
-					fmt.Printf("%s|", getDirectionArrow(float64(el.direction.Get(1, 0)), float64(el.direction.Get(0, 1))))
-				} else if el.value == COLLISION {
-					fmt.Printf(" C |")
-					//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
-				} else {
-					fmt.Printf("%s|", getDirectionArrow(0, 0))
-				}
-			}
-			enemeySpawned = false
-		}
-		fmt.Print("\n")
-	}
-}
-
-func getDirectionArrow(x, y float64) string {
-	//if x == 0 && y == 0 {
-	//	return " ● "
-	//}
-	if x == 0 && y == 0 {
-		return "   "
-	}
-
-	angle := math.Atan2(y, x)
-	directions := []string{" → ", " ↗ ", " ↑ ", " ↖ ", " ← ", " ↙ ", " ↓ ", " ↘ "}
-	index := int(math.Round(angle/(math.Pi/4)+8)) % 8
-	return directions[index]
-}
-
 func (a *AIAlgorithm) InitGraph() {
 	graph := make([][]Cell, a.height)
 	for i := range graph {
@@ -168,8 +80,28 @@ func (a *AIAlgorithm) InitGraph() {
 	log.Printf("Created graph, width: %d, height: %d\n", a.width, a.height)
 	a.expandCollisions()
 	a.addCollisions()
-	a.printGraphWithAxes2()
-	a.debug = true
+	//a.printGraphWithAxes2()
+	a.debug = false
+}
+
+func (a *AIAlgorithm) createDistancesMap() {
+	a.initDirections()
+
+	a.addPlayers()
+	a.addCollisions()
+	a.findBorders()
+
+	err := a.bfs()
+	if err != nil {
+		fmt.Println(err)
+	}
+	a.fillDirections()
+
+	// change flag to true to print graph
+	if a.debug {
+		a.debug = false
+		a.printGraphWithAxes()
+	}
 }
 
 func (a *AIAlgorithm) ClearGraph() {
@@ -180,7 +112,6 @@ func (a *AIAlgorithm) ClearGraph() {
 			row[j].value = 0
 		}
 	}
-	//a.printGraphWithAxes2()
 }
 
 func (a *AIAlgorithm) addPlayers() {
@@ -256,7 +187,6 @@ func (a *AIAlgorithm) findBorders() {
 	a.minBorderY = max(0, min(minBorderY, a.height-1))
 }
 
-// TODO ogranicz wyszukiwanie sąsiadów do najdalej oddalonego wroga i gracza
 func (a *AIAlgorithm) bfs() error {
 	queue := Queue{}
 	for _, player := range a.players {
@@ -307,61 +237,49 @@ func (a *AIAlgorithm) fillDirections() {
 	for _, enemy := range a.enemies {
 		position := enemy.GetPosition()
 
-		//vector := (*a.graph)[position.Y-a.offsetHeight][position.X-a.offsetWidth].direction
 		y := position.Y - a.offsetHeight
 		x := position.X - a.offsetWidth
 
-		//realX, realY := enemy.GetFloatPosition()
 		vector := (*a.graph)[y][x].direction
 
 		if vector == nil {
 			continue
 		}
 
-		vecX := vector[0]
-		vecY := vector[1]
-		previousX := enemy.GetPreviousDirectionX()
-		previousY := enemy.GetPreviousDirectionY()
-		if previousX == 0 && previousY == 0 {
-			enemy.SetDirection(*vector)
-			enemy.SetPreviousDirection(*vector)
-			continue
-		}
+		// TODO kinda temporary solution it can be done better
+		enemy.SetDirection(*vector)
 
-		passedTileX := x
-		passedTileY := y
-		if passedTileX%16 < 2 && passedTileY%16 < 2 {
-			if vecX != 0 && vecY != 0 {
-				canMoveX := (*a.graph)[y][x+int(vecX)].value != COLLISION
-				canMoveY := (*a.graph)[y+int(vecY)][x].value != COLLISION
-				canMoveDiagonal := (*a.graph)[y+int(vecY)][x+int(vecX)].value != COLLISION
+		// TODO left for debug in bright future
+		//vecX := vector[0]
+		//vecY := vector[1]
+		//previousX := enemy.GetPreviousDirectionX()
+		//previousY := enemy.GetPreviousDirectionY()
+		//if previousX == 0 && previousY == 0 {
+		//	enemy.SetDirection(*vector)
+		//	enemy.SetPreviousDirection(*vector)
+		//	continue
+		//}
 
-				if canMoveX && canMoveY && canMoveDiagonal {
-					enemy.SetDirection(*vector)
-				} else if canMoveX {
-					enemy.SetDirection(vec2.T{vecX, 0})
-				} else if canMoveY {
-					enemy.SetDirection(vec2.T{0, vecY})
-				}
-			} else {
-				enemy.SetDirection(*vector)
-			}
-		} else if passedTileX%16 < 2 {
-			if vecY != 0 {
-				enemy.SetDirection(vec2.T{0, vecY})
-			} else {
-				enemy.SetDirection(vec2.T{previousX, previousY})
-			}
-		} else if passedTileY%16 < 2 {
-			if vecX != 0 {
-				enemy.SetDirection(vec2.T{vecX, 0})
-			} else {
-				enemy.SetDirection(vec2.T{previousX, previousY})
-			}
-		}
+		//passedTileX := int(enemy.posX)
+		//passedTileY := int(enemy.posY)
+		//log.Printf("Vector %f, %f, mapX: %d, mapY: %d\n", vecX, vecY, x, y)
+		//if passedTileX%16 < 1 && passedTileY%16 < 1 {
+		//	enemy.SetDirection(*vector)
+		//} else if passedTileX%16 < 1 {
+		//	if vecY != 0 {
+		//		enemy.SetDirection(vec2.T{0, vecY})
+		//	} else {
+		//		enemy.SetDirection(vec2.T{previousX, previousY})
+		//	}
+		//} else if passedTileY%16 < 4 {
+		//	if vecX != 0 {
+		//		enemy.SetDirection(vec2.T{vecX, 0})
+		//	} else {
+		//		enemy.SetDirection(vec2.T{previousX, previousY})
+		//	}
+		//}
 
-		enemy.SetPreviousDirection(enemy.GetDirection())
-
+		//enemy.SetPreviousDirection(enemy.GetDirection())
 	}
 }
 
@@ -412,10 +330,11 @@ func (a *AIAlgorithm) getNeighborsExtended(vertex Coordinate) map[int]Coordinate
 	neighbors[DOWN] = Coordinate{X: vertex.X, Y: min(a.height-1, vertex.Y+1)}
 	neighbors[RIGHT] = Coordinate{X: min(a.width-1, vertex.X+1), Y: vertex.Y}
 
-	neighbors[UP_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: max(0, vertex.Y-1)}
-	neighbors[UP_RIGHT] = Coordinate{X: min(a.width-1, vertex.X+1), Y: max(0, vertex.Y-1)}
-	neighbors[DOWN_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: min(a.height-1, vertex.Y+1)}
-	neighbors[DOWN_RIGHT] = Coordinate{X: min(a.width-1, vertex.X+1), Y: min(a.height-1, vertex.Y+1)}
+	// TODO also left for debug in brightest future
+	//neighbors[UP_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: max(0, vertex.Y-1)}
+	//neighbors[UP_RIGHT] = Coordinate{X: min(a.width-1, vertex.X+1), Y: max(0, vertex.Y-1)}
+	//neighbors[DOWN_LEFT] = Coordinate{X: max(0, vertex.X-1), Y: min(a.height-1, vertex.Y+1)}
+	//neighbors[DOWN_RIGHT] = Coordinate{X: min(a.width-1, vertex.X+1), Y: min(a.height-1, vertex.Y+1)}
 
 	return neighbors
 }
@@ -443,4 +362,75 @@ func (a *AIAlgorithm) SetEnemies(enemies map[uint32]*Enemy) {
 
 func (a *AIAlgorithm) SetCollision(collisions []Coordinate) {
 	a.collisions = collisions
+}
+
+// printing functions used for debug purposes
+
+func (a *AIAlgorithm) printGraphWithAxes2() {
+	fmt.Print("    ")
+	for i := 0; i < len((*a.graph)[0]); i++ {
+		fmt.Printf("%2d |", i)
+	}
+	fmt.Print("\n")
+
+	for i, row := range *(a.graph) {
+		fmt.Printf("%2d ", i)
+		for _, el := range row {
+			if el.value != COLLISION {
+				fmt.Printf("%s|", getDirectionArrow(0, 0))
+			} else {
+				fmt.Printf(" C |")
+			}
+
+		}
+		fmt.Print("\n")
+	}
+}
+
+func (a *AIAlgorithm) printGraphWithAxes() {
+	fmt.Print("    ")
+	for i := 0; i < len((*a.graph)[0]); i++ {
+		fmt.Printf("%2d |", i)
+	}
+	fmt.Print("\n")
+
+	enemySpawned := false
+	for i, row := range *(a.graph) {
+		fmt.Printf("%2d  ", i)
+		for j, el := range row {
+			for _, enemy := range a.enemies {
+				position := enemy.position
+				if position.X-a.offsetWidth == j && position.Y-a.offsetHeight == i {
+					fmt.Printf(" ● |")
+					enemySpawned = true
+				}
+			}
+			if !enemySpawned {
+				if el.value != COLLISION && el.direction != nil {
+					fmt.Printf("%s|", getDirectionArrow(float64(el.direction.Get(1, 0)), float64(el.direction.Get(0, 1))))
+				} else if el.value == COLLISION {
+					fmt.Printf(" C |")
+					//fmt.Printf("%s||", getDirectionArrow(0.0, 0.0))
+				} else {
+					fmt.Printf("%s|", getDirectionArrow(0, 0))
+				}
+			}
+			enemySpawned = false
+		}
+		fmt.Print("\n")
+	}
+}
+
+func getDirectionArrow(x, y float64) string {
+	//if x == 0 && y == 0 {
+	//	return " ● "
+	//}
+	if x == 0 && y == 0 {
+		return "   "
+	}
+
+	angle := math.Atan2(y, x)
+	directions := []string{" → ", " ↗ ", " ↑ ", " ↖ ", " ← ", " ↙ ", " ↓ ", " ↘ "}
+	index := int(math.Round(angle/(math.Pi/4)+8)) % 8
+	return directions[index]
 }

@@ -168,12 +168,6 @@ func handleTCP(ch chan uint32) {
 				continue
 			}
 
-			//sizeBuffer := make([]byte, 2)
-			//_, err = io.ReadFull(reader, sizeBuffer)
-			//
-			//size := binary.BigEndian.Uint16(sizeBuffer)
-			//_, err = reader.Peek(int(size))
-
 			encodedPrefixMsg := make([]byte, PREFIX_SIZE)
 			_, err = io.ReadFull(reader, encodedPrefixMsg)
 
@@ -358,8 +352,8 @@ func handleSendSpawnedEnemies() {
 }
 
 func handleRoomChange(msg *pb.StateUpdate, id uint32) {
-	log.Println("Room changed")
-	log.Println("-------------------------------")
+	//log.Println("Room changed")
+	//log.Println("-------------------------------")
 	enemies = make(map[uint32]*g.Enemy)
 	players = make(map[uint32]g.Coordinate)
 	isGraph = false
@@ -424,7 +418,7 @@ func handleMapDimensionUpdate(update []byte) {
 	algorithm.InitGraph()
 	collisions = make([]g.Coordinate, 0)
 	isGraph = true
-	log.Printf("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
+	//log.Printf("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
 }
 
 func decompressMessage(update []byte) []byte {
@@ -458,11 +452,8 @@ func handleSpawnEnemyRequest(enemiesToSpawn []*pb.Enemy) {
 	isSpawned = true
 }
 
-// TODO zrobić rozróżnianie na różnych przeciwników
 func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	newEnemyId := enemyIds.getID()
-	//TODO jakoś rozwiązać problem z dzieleniem przez scalling factor przeciwników bo jak przesyłam przy spawnie info
-	// to je muszę spowrotem mnożyć xDDDDDDDDDD
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
@@ -475,7 +466,7 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 		enemyConfig.TextureData,
 		enemyConfig.CollisionData,
 	)
-	log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.PositionX, enemyToSpawn.PositionY, enemyConfig.HP)
+	//log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.PositionX, enemyToSpawn.PositionY, enemyConfig.HP)
 
 	return newEnemyId
 }
@@ -493,7 +484,6 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 	addPlayers(update.Players)
 	addEnemies(update.Enemies)
 
-	// TODO nie wiem czy nie da się jakoś sprytniej tego przypisywać - sprawdź to
 	algorithm.SetPlayers(players)
 	algorithm.SetEnemies(enemies)
 
@@ -519,7 +509,6 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 		log.Printf("Failed to serialize enemy positions update, err: %s\n", err)
 	}
 
-	//log.Printf(">>Enemy's vector x: %f, y: %f\n", )
 	for _, addrPort := range addrPorts {
 		udpAddr := net.UDPAddrFromAddrPort(addrPort)
 		conn.WriteToUDP(serializedMsg, udpAddr)
@@ -527,7 +516,6 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 }
 
 func addPlayers(playersProto []*pb.Player) {
-	//TODO napraw handlowanie tego że plpayer się rozłącza i dalej jest dodawany do grafu
 	for _, player := range playersProto {
 		players[player.GetId()] = g.Coordinate{
 			X: int(player.PositionX / SCALLING_FACTOR),
