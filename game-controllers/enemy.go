@@ -14,7 +14,6 @@ type Enemy struct {
 	textureData       u.TextureData
 	collisionData     u.CollisionData
 	previousDirection vec2.T
-	posX, posY        float32
 }
 
 func NewEnemy(id uint32, x, y int, typ, name string, hp, damage float64, textureData u.TextureData, collisionData u.CollisionData) *Enemy {
@@ -105,21 +104,4 @@ func (e *Enemy) GetTextureData() u.TextureData {
 
 func (e *Enemy) GetCollisionData() u.CollisionData {
 	return e.collisionData
-}
-
-func (e *Enemy) SetFloatPosX(posX float32) {
-	e.posX = posX
-}
-
-func (e *Enemy) SetFloatPosY(posY float32) {
-	e.posY = posY
-}
-
-func (e *Enemy) SetFloatPosition(posX, posY float32) {
-	e.posX = posX
-	e.posY = posY
-}
-
-func (e *Enemy) GetFloatPosition() (float32, float32) {
-	return e.posX, e.posY
 }
