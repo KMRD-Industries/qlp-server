@@ -211,7 +211,7 @@ func handleTCP(ch chan uint32) {
 						handleRoomChange(update, id)
 					case pb.StateVariant_SPAWN_ENEMY_REQUEST:
 						if !isSpawned {
-							handleSpawnEnemyRequest(update.EnemyPositionsUpdate.EnemyPositions)
+							handleSpawnEnemyRequest(update.EnemySpawnerPositions)
 						}
 						handleSendSpawnedEnemies()
 					default:
@@ -258,19 +258,18 @@ func handleUDP(ch chan uint32) {
 		}
 
 		if err == nil {
-			msg := &pb.StateUpdate{}
+			movementUpdate := &pb.MovementUpdate{}
 
-			err = proto.Unmarshal(b[:n], msg)
+			err = proto.Unmarshal(b[:n], movementUpdate)
 			if err != nil {
 				log.Printf("Failed to deserialize: %v\n", err)
 				continue
 			}
 
-			switch msg.Variant {
-			case pb.StateVariant_PLAYER_POSITION_UPDATE:
-				positionUpdate := msg.MovementUpdate
+			switch movementUpdate.Variant {
+			case pb.MovementVariant_PLAYER_MOVEMENT_UPDATE:
 				senderAddrPort := sender.AddrPort()
-				id := positionUpdate.EntityId
+				id := movementUpdate.EntityId
 
 				connLock.RLock()
 				// skip packets from disconnected player
@@ -290,9 +289,9 @@ func handleUDP(ch chan uint32) {
 						conn.WriteToUDP(b[:n], udpAddr)
 					}
 				}
-			case pb.StateVariant_MAP_UPDATE:
+			case pb.MovementVariant_MAP_UPDATE:
 				if isGraph {
-					handleMapUpdate(msg, conn)
+					handleMapUpdate(movementUpdate.MapPositionsUpdate, conn)
 				}
 			}
 		}
@@ -300,7 +299,10 @@ func handleUDP(ch chan uint32) {
 }
 
 func handleSendSpawnedEnemies() {
-	spawnedEnemies := make([]*pb.Enemy, 0, len(enemies))
+	responseMsg := &pb.StateUpdate{
+		Variant: pb.StateVariant_SPAWN_ENEMY_REQUEST,
+	}
+
 	for _, enemy := range enemies {
 		textureData := enemy.GetTextureData()
 		collisionData := enemy.GetCollisionData()
@@ -325,14 +327,7 @@ func handleSendSpawnedEnemies() {
 				YOffset: collisionData.YOffset,
 			},
 		}
-		spawnedEnemies = append(spawnedEnemies, protoEnemy)
-	}
-
-	spawnedEnemiesMsg := &pb.EnemyPositionsUpdate{EnemyPositions: spawnedEnemies}
-
-	responseMsg := &pb.StateUpdate{
-		Variant:              pb.StateVariant_SPAWN_ENEMY_REQUEST,
-		EnemyPositionsUpdate: spawnedEnemiesMsg,
+		responseMsg.EnemySpawnerPositions = append(responseMsg.GetEnemySpawnerPositions(), protoEnemy)
 	}
 
 	serializedMsg, err := proto.Marshal(responseMsg)
@@ -478,9 +473,7 @@ func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 	}
 }
 
-func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
-	update := msg.MapPositionsUpdate
-
+func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
 	addPlayers(update.Players)
 	addEnemies(update.Enemies)
 
@@ -490,18 +483,13 @@ func handleMapUpdate(msg *pb.StateUpdate, conn *net.UDPConn) {
 	algorithm.GetEnemiesUpdate()
 	algorithm.ClearGraph()
 
-	enemiesToSend := make([]*pb.Enemy, 0, len(enemies))
+	responseMsg := &pb.MovementUpdate{
+		Variant: pb.MovementVariant_MAP_UPDATE,
+	}
+
 	for _, enemy := range enemies {
-		enemiesToSend = append(enemiesToSend, convertToProtoEnemy(enemy))
-	}
-
-	enemyPositionsUpdate := &pb.EnemyPositionsUpdate{
-		EnemyPositions: enemiesToSend,
-	}
-
-	responseMsg := &pb.StateUpdate{
-		Variant:              pb.StateVariant_MAP_UPDATE,
-		EnemyPositionsUpdate: enemyPositionsUpdate,
+		enemyToSend := convertToProtoEnemy(enemy)
+		responseMsg.EnemyPositions = append(responseMsg.EnemyPositions, enemyToSend)
 	}
 
 	serializedMsg, err := proto.Marshal(responseMsg)
