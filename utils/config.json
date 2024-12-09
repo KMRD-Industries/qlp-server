@@ -1,0 +1,113 @@
+{
+  "debugMode": true,
+  "gameScale": 3.0,
+  "meterToPixelRatio": 30.0,
+  "pixelToMeterRatio": 0.033333333,
+  "tileHeight": 16.0,
+  "oneFrameTime": 0.016666667,
+  "frameCycle": 60,
+  "maximumNumberOfLayers": 10,
+  "playerAttackRange": 1000.0,
+  "playerAttackDamage": 10.0,
+  "playerAttackAngle": 0.785,
+  "mapFirstEntity": 1000,
+  "numberOfMapEntities": 500,
+  "enemyFirstEntity": 2000,
+  "numberOfEnemyEntities": 100,
+  "playerEntity": 1,
+  "playerAnimation": 184,
+  "playerAcc": 300,
+  "enemyAcc": 25,
+  "startingRoomId": 0,
+  "initWidth": 1920,
+  "initHeight": 1080,
+  "backgroundColor": "#17205C",
+  "maxCharacterHP": 100.0,
+  "defaultCharacterHP": 100.0,
+  "defaultEnemyKnockbackForce": 300.0,
+  "applyKnockback": false,
+  "maxDungeonDepth": 5,
+  "startingPosition": [325.0, 325.0],
+  "spawnOffset": 25.0,
+  "invulnerabilityTimeAfterDMG": 30.0,
+  "fullHPColor": [0.0, 1.0, 0.0, 1.0],
+  "lowHPColor": [1.0, 0.0, 0.0, 1.0],
+  "textTagDefaultSize": 20,
+  "textTagDefaultLifetime": 60.0,
+  "textTagDefaultSpeed": 1.0,
+  "textTagDefaultAcceleration": 10.0,
+  "textTagDefaultFadeValue": 20,
+  "weaponComponentDefaultDamageAmount": 0,
+  "weaponComponentDefaultIsAttacking": false,
+  "weaponComponentDefaultQueuedAttack": false,
+  "weaponComponentDefaultQueuedAttackFlag": false,
+  "weaponComponentDefaultIsSwingingForward": true,
+  "weaponComponentDefaultIsFacingRight": true,
+  "weaponComponentDefaultCurrentAngle": 0.0,
+  "weaponComponentDefaultInitialAngle": 30.0,
+  "weaponComponentDefaultRotationSpeed": 15.0,
+  "weaponComponentDefaultSwingDistance": 90.0,
+  "weaponComponentDefaultRemainingDistance": 0.0,
+  "weaponComponentDefaultRecoilAmount": 10.0,
+  "weaponInteractionDistance": 200,
+  "enemyData": [
+    {
+      "type": "Melee",
+      "name": "Slime",
+      "hp": 20.0,
+      "damage": 5.0,
+      "textureData": {
+        "tileID": 18,
+        "tileSet": "AnimSlimes",
+        "tileLayer": 4
+      },
+      "collisionData": {
+        "type": 1,
+        "width": 8.5625,
+        "height": 13.24865,
+        "xOffset": 16.375,
+        "yOffset": 8.5227
+      }
+    },
+    {
+      "type": "Boss",
+      "name": "Boss",
+      "hp": 200.0,
+      "damage": 30.0,
+      "textureData": {
+        "tileID": 54,
+        "tileSet": "AnimSlimes",
+        "tileLayer": 4
+      },
+      "collisionData": {
+        "type": 1,
+        "width": 8.5625,
+        "height": 13.24865,
+        "xOffset": 16.375,
+        "yOffset": 8.5227
+      }
+    }
+  ],
+  "itemsData": [
+    {
+      "name": "HPPotion",
+      "value": 10.0,
+      "behaviour": "Heal",
+      "textureData": {
+        "tileID": 690,
+        "tileSet": "Items",
+        "tileLayer": 4
+      }
+    },
+    {
+      "name": "DMGPotion",
+      "value": 2.0,
+      "behaviour": "DmgUp",
+      "textureData": {
+        "tileID": 693,
+        "tileSet": "Items",
+        "tileLayer": 4
+      }
+    }
+  ]
+}

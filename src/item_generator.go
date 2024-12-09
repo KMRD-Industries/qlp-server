@@ -41,7 +41,7 @@ func newGenerator(players int) *ItemGenerator {
 	randintGenerations := make(map[uint32]uint32)
 	randintGenerations[0] = r
 
-	idPool := newIDPool(100)
+	idPool := newIDPool(ITEM_MIN_ID, ITEM_MAX_ID)
 	initialID := idPool.getID()
 	idGenerations := make(map[uint32]uint32)
 	idGenerations[0] = initialID
