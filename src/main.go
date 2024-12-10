@@ -22,7 +22,7 @@ import (
 
 const (
 	MAX_PLAYERS     = 8
-	SERVER_PORT     = 9001
+	SERVER_PORT     = 10823
 	BUF_SIZE        = 8192
 	SCALLING_FACTOR = 16
 	PLAYER_MIN_ID   = 1
@@ -480,7 +480,7 @@ func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
 	algorithm.SetPlayers(players)
 	algorithm.SetEnemies(enemies)
 
-	algorithm.GetEnemiesUpdate()
+	algorithm.CreateDistancesMap()
 	algorithm.ClearGraph()
 
 	responseMsg := &pb.MovementUpdate{

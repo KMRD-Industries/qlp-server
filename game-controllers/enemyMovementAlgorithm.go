@@ -49,10 +49,6 @@ func (c *Cell) GetCellValue() int {
 	return c.value
 }
 
-func (a *AIAlgorithm) GetEnemiesUpdate() {
-	a.createDistancesMap()
-}
-
 func NewAIAlgorithm() *AIAlgorithm {
 	return &AIAlgorithm{}
 }
@@ -84,7 +80,7 @@ func (a *AIAlgorithm) InitGraph() {
 	a.debug = false
 }
 
-func (a *AIAlgorithm) createDistancesMap() {
+func (a *AIAlgorithm) CreateDistancesMap() {
 	a.initDirections()
 
 	a.addPlayers()

@@ -36,7 +36,7 @@ func (s *Simulation) startSimulation() {
 	s.algorithm.SetPlayers(s.players)
 	s.algorithm.SetCollision(s.collisions)
 
-	s.algorithm.GetEnemiesUpdate()
+	s.algorithm.CreateDistancesMap()
 	//for _, enemy := range s.enemies {
 	//	position := enemy.GetPosition()
 	//	fmt.Printf("Enemy's new direction id: %d, position: xpos: %d, ypos: %d, x: %f, y: %f\n", enemy.GetId(), position.X, position.Y, enemy.GetDirectionX(), enemy.GetDirectionY())
