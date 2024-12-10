@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"log"
 	"sync"
 )
 
@@ -9,15 +10,18 @@ type idPool struct {
 	availableIDs *PriorityQueue
 	nextID       uint32
 	lock         sync.Mutex
+	minId, maxId uint32
 }
 
-func newIDPool(start uint32) *idPool {
+func newIDPool(minId, maxId uint32) *idPool {
 	pq := &PriorityQueue{}
 	heap.Init(pq)
 	return &idPool{
 		availableIDs: pq,
-		nextID:       start,
+		nextID:       minId,
 		lock:         sync.Mutex{},
+		maxId:        maxId,
+		minId:        minId,
 	}
 }
 
@@ -28,6 +32,11 @@ func (p *idPool) getID() uint32 {
 	if p.availableIDs.Len() > 0 {
 		return heap.Pop(p.availableIDs).(uint32)
 	}
+
+	if p.nextID > p.maxId {
+		log.Printf("ERROR DURING ID ASSIGMENT: Id pool out of ids, current id: %d, maxId:%d\n", p.nextID, p.maxId)
+	}
+
 	id := p.nextID
 	p.nextID++
 
@@ -36,7 +45,11 @@ func (p *idPool) getID() uint32 {
 
 func (p *idPool) returnID(id uint32) {
 	p.lock.Lock()
-	heap.Push(p.availableIDs, id)
+	if id <= p.maxId {
+		heap.Push(p.availableIDs, id)
+	} else {
+		log.Printf("ERORR DURING RETURNING ID: Id is not from the pool, id: %d, maxId: %d\n", id, p.maxId)
+	}
 	p.lock.Unlock()
 }
 
