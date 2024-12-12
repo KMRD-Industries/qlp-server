@@ -48,6 +48,7 @@ var (
 	collisions        = make([]g.Coordinate, 0)
 	enemies           = make(map[uint32]*g.Enemy)
 	players           = make(map[uint32]g.Coordinate)
+	deadPlayers       = make(map[uint32]bool)
 	algorithm         = g.NewAIAlgorithm()
 	isSpawned         = false
 	spawnedEnemiesIds = make([]uint32, 0)
@@ -103,6 +104,7 @@ func listenTCP() {
 
 			// these will be monitored (we're assuming that closing conn means losing connection)
 			tcpConns[id] = conn
+			deadPlayers[id] = false
 			connLock.Unlock()
 
 			// inform player of current game state
@@ -126,41 +128,7 @@ func handleTCP(ch chan uint32) {
 			_, err := reader.Peek(PREFIX_SIZE)
 
 			if errors.Is(err, io.EOF) {
-				ch <- id
-
-				gameLock.Lock()
-				game.removePlayer(id)
-				gameLock.Unlock()
-
-				msg := &pb.StateUpdate{
-					Player:  &pb.Player{Id: id},
-					Variant: pb.StateVariant_DISCONNECTED,
-				}
-
-				for otherID, c := range tcpConns {
-					if otherID != id {
-						serializedMsg, _ := proto.Marshal(msg)
-						encoded := addPrefixAndPadding(serializedMsg)
-
-						c.Write(encoded)
-					}
-				}
-				log.Printf("disconnected %d\n", id)
-
-				connLock.RUnlock()
-				connLock.Lock()
-				if conn, ok := tcpConns[id]; ok {
-					conn.Close()
-					delete(tcpConns, id)
-				}
-
-				if len(tcpConns) == 0 {
-					gameLock.Lock()
-					game = newGame()
-					gameLock.Unlock()
-				}
-				connLock.Unlock()
-				connLock.RLock()
+				disconnectPlayer(ch, id)
 			}
 
 			if err != nil {
@@ -214,21 +182,29 @@ func handleTCP(ch chan uint32) {
 							handleSpawnEnemyRequest(update.EnemySpawnerPositions)
 						}
 						handleSendSpawnedEnemies()
+					case pb.StateVariant_PLAYER_DIED:
+						deadPlayers[update.GetPlayer().GetId()] = true
+						log.Printf("Player with id %d died\n", update.GetPlayer().GetId())
+						rebroadcastToOthers(id, update)
 					default:
-						for otherID, otherConn := range tcpConns {
-							if id != otherID {
-								serializedMsg, _ := proto.Marshal(update)
-								encoded := addPrefixAndPadding(serializedMsg)
-
-								otherConn.Write(encoded)
-							}
-						}
+						rebroadcastToOthers(id, update)
 					}
 					continue
 				}
 			}
 		}
 		connLock.RUnlock()
+	}
+}
+
+func rebroadcastToOthers(id uint32, update *pb.StateUpdate) {
+	for otherID, otherConn := range tcpConns {
+		if id != otherID {
+			serializedMsg, _ := proto.Marshal(update)
+			encoded := addPrefixAndPadding(serializedMsg)
+
+			otherConn.Write(encoded)
+		}
 	}
 }
 
@@ -296,6 +272,44 @@ func handleUDP(ch chan uint32) {
 			}
 		}
 	}
+}
+
+func disconnectPlayer(ch chan uint32, id uint32) {
+	ch <- id
+
+	gameLock.Lock()
+	game.removePlayer(id)
+	gameLock.Unlock()
+
+	msg := &pb.StateUpdate{
+		Player:  &pb.Player{Id: id},
+		Variant: pb.StateVariant_DISCONNECTED,
+	}
+
+	for otherID, c := range tcpConns {
+		if otherID != id {
+			serializedMsg, _ := proto.Marshal(msg)
+			encoded := addPrefixAndPadding(serializedMsg)
+
+			c.Write(encoded)
+		}
+	}
+	log.Printf("disconnected %d\n", id)
+
+	connLock.RUnlock()
+	connLock.Lock()
+	if conn, ok := tcpConns[id]; ok {
+		conn.Close()
+		delete(tcpConns, id)
+	}
+
+	if len(tcpConns) == 0 {
+		gameLock.Lock()
+		game = newGame()
+		gameLock.Unlock()
+	}
+	connLock.Unlock()
+	connLock.RLock()
 }
 
 func handleSendSpawnedEnemies() {
@@ -505,9 +519,11 @@ func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
 
 func addPlayers(playersProto []*pb.Player) {
 	for _, player := range playersProto {
-		players[player.GetId()] = g.Coordinate{
-			X: int(player.PositionX / SCALLING_FACTOR),
-			Y: int(player.PositionY / SCALLING_FACTOR),
+		if !deadPlayers[player.GetId()] {
+			players[player.GetId()] = g.Coordinate{
+				X: int(player.PositionX / SCALLING_FACTOR),
+				Y: int(player.PositionY / SCALLING_FACTOR),
+			}
 		}
 	}
 }
