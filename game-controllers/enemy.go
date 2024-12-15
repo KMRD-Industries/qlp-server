@@ -94,6 +94,16 @@ func (e *Enemy) GetHp() float64 {
 	return e.hp
 }
 
+func (e *Enemy) GotHit(dmgReceived float64) bool {
+	e.hp -= dmgReceived
+
+	if e.hp <= 0 {
+		return false
+	}
+
+	return true
+}
+
 func (e *Enemy) GetDamage() float64 {
 	return e.damage
 }

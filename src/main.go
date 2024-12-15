@@ -214,6 +214,21 @@ func handleTCP(ch chan uint32) {
 							handleSpawnEnemyRequest(update.EnemySpawnerPositions)
 						}
 						handleSendSpawnedEnemies()
+					case pb.StateVariant_ENEMY_GOT_HIT_UPDATE:
+						// TODO gracz na serwerze
+						log.Printf("Got hit by player %d, for %f hp\n", update.EnemyId.Id, config.PlayerAttackDamage)
+						if !enemies[update.EnemyId.Id].GotHit(config.PlayerAttackDamage) {
+							delete(enemies, update.EnemyId.Id)
+							log.Printf("Enemy with id %d, died. RIP\n", update.EnemyId.Id)
+							deadEnemyMsg := &pb.StateUpdate{
+								Variant: pb.StateVariant_ENEMY_DIED,
+								EnemyId: update.EnemyId}
+							serializedMsg, _ := proto.Marshal(deadEnemyMsg)
+							encoded := addPrefixAndPadding(serializedMsg)
+							for _, playerConn := range tcpConns {
+								playerConn.Write(encoded)
+							}
+						}
 					default:
 						for otherID, otherConn := range tcpConns {
 							if id != otherID {
@@ -346,6 +361,10 @@ func handleSendSpawnedEnemies() {
 	}
 }
 
+func handleEnemyDeath() {
+
+}
+
 func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 	//log.Println("Room changed")
 	//log.Println("-------------------------------")
@@ -449,6 +468,7 @@ func handleSpawnEnemyRequest(enemiesToSpawn []*pb.Enemy) {
 
 func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	newEnemyId := enemyIds.getID()
+	// slime
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
