@@ -50,36 +50,12 @@ func (e *Enemy) GetId() uint32 {
 	return e.id
 }
 
-func (e *Enemy) GetDirection() vec2.T {
-	return e.direction
-}
-
 func (e *Enemy) GetDirectionX() float32 {
 	return e.direction.Get(1, 0)
 }
 
 func (e *Enemy) GetDirectionY() float32 {
 	return e.direction.Get(0, 1)
-}
-
-func (e *Enemy) SetDirection(direction vec2.T) {
-	e.direction = direction
-}
-
-func (e *Enemy) GetPreviousDirection() vec2.T {
-	return e.previousDirection
-}
-
-func (e *Enemy) GetPreviousDirectionX() float32 {
-	return e.previousDirection.Get(1, 0)
-}
-
-func (e *Enemy) GetPreviousDirectionY() float32 {
-	return e.previousDirection.Get(0, 1)
-}
-
-func (e *Enemy) SetPreviousDirection(direction vec2.T) {
-	e.previousDirection = direction
 }
 
 func (e *Enemy) GetType() string {

@@ -3,7 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"os"
 )
 
@@ -18,7 +18,7 @@ func (j *JsonParser) ParseConfig(filePath string) (Config, error) {
 	var config Config
 	file, err := os.Open(filePath)
 	if err != nil {
-		fmt.Println("Error opening file: ", err)
+		log.Println("Error opening file: ", err)
 		return config, err
 	}
 	err = json.NewDecoder(file).Decode(&config)

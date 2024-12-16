@@ -76,7 +76,6 @@ func (a *AIAlgorithm) InitGraph() {
 	log.Printf("Created graph, width: %d, height: %d\n", a.width, a.height)
 	a.expandCollisions()
 	a.addCollisions()
-	//a.printGraphWithAxes2()
 	a.debug = false
 }
 
@@ -152,7 +151,6 @@ func (a *AIAlgorithm) expandCollisions() {
 		}
 	}
 
-	fmt.Printf("ExpandedCollisions: %d\n", len(expandedCollisions))
 	a.collisions = expandedCollisions
 }
 
@@ -163,7 +161,7 @@ func (a *AIAlgorithm) findBorders() {
 	maxBorderY := 0
 
 	for _, enemy := range a.enemies {
-		position := enemy.GetPosition()
+		position := enemy.position
 		minBorderX = min(minBorderX, position.X-a.offsetWidth)
 		minBorderY = min(minBorderY, position.Y-a.offsetHeight)
 		maxBorderX = max(maxBorderX, position.X-a.offsetWidth)
@@ -231,7 +229,7 @@ func (a *AIAlgorithm) fillDirections() {
 	}
 
 	for _, enemy := range a.enemies {
-		position := enemy.GetPosition()
+		position := enemy.position
 
 		y := position.Y - a.offsetHeight
 		x := position.X - a.offsetWidth
@@ -243,7 +241,7 @@ func (a *AIAlgorithm) fillDirections() {
 		}
 
 		// TODO kinda temporary solution it can be done better
-		enemy.SetDirection(*vector)
+		enemy.direction = *vector
 
 		// TODO left for debug in bright future
 		//vecX := vector[0]
@@ -361,7 +359,6 @@ func (a *AIAlgorithm) SetCollision(collisions []Coordinate) {
 }
 
 // printing functions used for debug purposes
-
 func (a *AIAlgorithm) printGraphWithAxes2() {
 	fmt.Print("    ")
 	for i := 0; i < len((*a.graph)[0]); i++ {
