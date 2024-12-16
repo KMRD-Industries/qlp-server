@@ -34,7 +34,7 @@ func NewEnemy(id uint32, x, y int, typ, name string, hp, damage float64, texture
 func NewTestEnemy(id uint32, x, y int) *Enemy {
 	return &Enemy{
 		id:       id,
-		position: Coordinate{x, y},
+		position: Coordinate{x, y, 0.0, 0.0},
 	}
 }
 
@@ -42,8 +42,8 @@ func (e *Enemy) GetPosition() Coordinate {
 	return e.position
 }
 
-func (e *Enemy) SetPosition(newX, newY int) {
-	e.position = Coordinate{newX, newY}
+func (e *Enemy) SetPosition(newX, newY, newFloatX, newFloatY float32) {
+	e.position = Coordinate{int(newX), int(newY), newFloatX, newFloatY}
 }
 
 func (e *Enemy) GetId() uint32 {

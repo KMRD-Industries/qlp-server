@@ -307,13 +307,15 @@ func handleSendSpawnedEnemies() {
 		textureData := enemy.GetTextureData()
 		collisionData := enemy.GetCollisionData()
 		protoEnemy := &pb.Enemy{
-			Id:        enemy.GetId(),
-			PositionX: float32(enemy.GetPosition().X) * SCALLING_FACTOR,
-			PositionY: float32(enemy.GetPosition().Y) * SCALLING_FACTOR,
-			Type:      enemy.GetType(),
-			Name:      enemy.GetName(),
-			Hp:        enemy.GetHp(),
-			Damage:    enemy.GetDamage(),
+			Id: enemy.GetId(),
+			Vector: &pb.Position{
+				X: float32(enemy.GetPosition().X) * SCALLING_FACTOR,
+				Y: float32(enemy.GetPosition().Y) * SCALLING_FACTOR,
+			},
+			Type:   enemy.GetType(),
+			Name:   enemy.GetName(),
+			Hp:     enemy.GetHp(),
+			Damage: enemy.GetDamage(),
 			TextureData: &pb.TextureData{
 				TileId:    textureData.TileID,
 				TileSet:   textureData.TileSet,
@@ -433,9 +435,15 @@ func decompressMessage(update []byte) []byte {
 
 func convertToProtoEnemy(enemy *g.Enemy) *pb.Enemy {
 	return &pb.Enemy{
-		Id:        enemy.GetId(),
-		PositionX: enemy.GetDirectionX(),
-		PositionY: enemy.GetDirectionY(),
+		Id: enemy.GetId(),
+		Vector: &pb.Position{
+			X: enemy.GetDirectionX(),
+			Y: enemy.GetDirectionY(),
+		},
+		Position: &pb.Position{
+			X: enemy.GetPosition().FloatX,
+			Y: enemy.GetPosition().FloatY,
+		},
 	}
 }
 
@@ -452,8 +460,8 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 	enemyConfig := config.EnemyData[0]
 	enemies[newEnemyId] = g.NewEnemy(
 		newEnemyId,
-		int(enemyToSpawn.PositionX/SCALLING_FACTOR),
-		int(enemyToSpawn.PositionY/SCALLING_FACTOR),
+		int(enemyToSpawn.Position.X/SCALLING_FACTOR),
+		int(enemyToSpawn.Position.Y/SCALLING_FACTOR),
 		enemyConfig.Type,
 		enemyConfig.Name,
 		enemyConfig.HP,
@@ -474,14 +482,18 @@ func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 }
 
 func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
-	addPlayers(update.Players)
-	addEnemies(update.Enemies)
+	if algorithm.Updating.CompareAndSwap(false, true) {
+		addPlayers(update.Players)
+		addEnemies(update.Enemies)
 
-	algorithm.SetPlayers(players)
-	algorithm.SetEnemies(enemies)
+		algorithm.SetPlayers(players)
+		algorithm.SetEnemies(enemies)
 
-	algorithm.CreateDistancesMap()
-	algorithm.ClearGraph()
+		algorithm.CreateDistancesMap()
+		algorithm.ClearGraph()
+	}
+
+	defer algorithm.Updating.Store(false)
 
 	responseMsg := &pb.MovementUpdate{
 		Variant: pb.MovementVariant_MAP_UPDATE,
@@ -516,7 +528,7 @@ func addEnemies(enemiesProto []*pb.Enemy) {
 	for _, enemy := range enemiesProto {
 		enemyOnBoard := enemies[enemy.GetId()]
 		if enemyOnBoard != nil {
-			enemies[enemy.GetId()].SetPosition(int(enemy.PositionX/SCALLING_FACTOR), int(enemy.PositionY/SCALLING_FACTOR))
+			enemies[enemy.GetId()].SetPosition(enemy.Position.X/SCALLING_FACTOR, enemy.Position.Y/SCALLING_FACTOR, enemy.Position.X, enemy.Position.Y)
 		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/ungerik/go3d/vec2"
 	"log"
 	"math"
+	"sync/atomic"
 )
 
 var (
@@ -29,6 +30,7 @@ type AIAlgorithm struct {
 	enemies                                        map[uint32]*Enemy
 	graph                                          *[][]Cell
 	minBorderX, minBorderY, maxBorderX, maxBorderY int
+	Updating                                       atomic.Bool
 	debug                                          bool
 }
 
@@ -38,7 +40,8 @@ type Cell struct {
 }
 
 type Coordinate struct {
-	X, Y int
+	X, Y           int
+	FloatX, FloatY float32
 }
 
 func (c *Cell) GetDirection() vec2.T {
@@ -236,6 +239,9 @@ func (a *AIAlgorithm) fillDirections() {
 		y := position.Y - a.offsetHeight
 		x := position.X - a.offsetWidth
 
+		if x < 0 || y < 0 {
+			continue
+		}
 		vector := (*a.graph)[y][x].direction
 
 		if vector == nil {
