@@ -6,6 +6,7 @@ import (
 	"github.com/ungerik/go3d/vec2"
 	"log"
 	"math"
+	"sync"
 )
 
 var (
@@ -23,6 +24,7 @@ var (
 )
 
 type AIAlgorithm struct {
+	Mutex                                          sync.RWMutex
 	width, height, offsetWidth, offsetHeight       int
 	collisions                                     []Coordinate
 	players                                        map[uint32]Coordinate
@@ -72,8 +74,10 @@ func (a *AIAlgorithm) InitGraph() {
 	for i := range graph {
 		graph[i] = make([]Cell, a.width)
 	}
+
 	a.graph = &graph
 	log.Printf("Created graph, width: %d, height: %d\n", a.width, a.height)
+
 	a.expandCollisions()
 	a.addCollisions()
 	a.debug = false
@@ -81,7 +85,6 @@ func (a *AIAlgorithm) InitGraph() {
 
 func (a *AIAlgorithm) CreateDistancesMap() {
 	a.initDirections()
-
 	a.addPlayers()
 	a.addCollisions()
 	a.findBorders()
@@ -182,6 +185,7 @@ func (a *AIAlgorithm) findBorders() {
 }
 
 func (a *AIAlgorithm) bfs() error {
+
 	queue := Queue{}
 	for _, player := range a.players {
 		playerWithOffset := Coordinate{

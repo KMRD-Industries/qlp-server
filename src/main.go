@@ -18,6 +18,7 @@ import (
 	g "server/game-controllers"
 	u "server/utils"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -50,12 +51,31 @@ var (
 	enemies           = make(map[uint32]*g.Enemy)
 	players           = make(map[uint32]g.Coordinate)
 	algorithm         = g.NewAIAlgorithm()
-	isSpawned         = false
+	isSpawned         atomic.Bool
+	isMapUpdated      atomic.Bool
 	spawnedEnemiesIds = make([]uint32, 0)
 	config            = u.Config{}
-	isGraph           = false
 	logger            = slog.New(slog.NewTextHandler(os.Stderr, nil))
 )
+
+type SingleFlight struct {
+	lock chan struct{}
+}
+
+func NewSingleFlight() *SingleFlight {
+	return &SingleFlight{lock: make(chan struct{}, 1)}
+}
+
+func (s *SingleFlight) TryExecute(f func()) bool {
+	select {
+	case s.lock <- struct{}{}:
+		f()
+		<-s.lock
+		return true
+	default:
+		return false
+	}
+}
 
 func listenTCP() {
 	stateUpdate := &pb.StateUpdate{
@@ -116,7 +136,7 @@ func listenTCP() {
 	}
 }
 
-func handleTCP(ch chan uint32) {
+func handleTCP(userCh chan uint32, graphCh chan bool) {
 	updateSeries := &pb.StateUpdateSeries{}
 
 	for {
@@ -128,7 +148,7 @@ func handleTCP(ch chan uint32) {
 			_, err := reader.Peek(PREFIX_SIZE)
 
 			if errors.Is(err, io.EOF) {
-				ch <- id
+				userCh <- id
 
 				gameLock.Lock()
 				game.removePlayer(id)
@@ -207,14 +227,19 @@ func handleTCP(ch chan uint32) {
 
 						conn.Write(encoded)
 					case pb.StateVariant_MAP_DIMENSIONS_UPDATE:
-						handleMapDimensionUpdate(update.CompressedMapDimensionsUpdate)
+						if !isMapUpdated.Load() {
+							isMapUpdated.Store(true)
+							handleMapDimensionUpdate(update.CompressedMapDimensionsUpdate)
+						}
 					case pb.StateVariant_ROOM_CHANGED:
+						graphCh <- false
 						handleRoomChange(update, id)
 					case pb.StateVariant_SPAWN_ENEMY_REQUEST:
-						if !isSpawned {
+						if !isSpawned.Load() {
 							handleSpawnEnemyRequest(update.EnemySpawnerPositions)
 						}
 						handleSendSpawnedEnemies()
+						graphCh <- true
 					default:
 						for otherID, otherConn := range tcpConns {
 							if id != otherID {
@@ -233,12 +258,13 @@ func handleTCP(ch chan uint32) {
 	}
 }
 
-func handleUDP(ch chan uint32) {
+func handleUDP(userCh chan uint32, graphCh chan bool, sf *SingleFlight) {
 	addr := net.UDPAddr{
 		Port: SERVER_PORT,
 		IP:   ip,
 	}
 	b := make([]byte, BUF_SIZE)
+	isGraph := false
 
 	conn, err := net.ListenUDP("udp", &addr)
 
@@ -253,8 +279,14 @@ func handleUDP(ch chan uint32) {
 		n, sender, err := conn.ReadFromUDP(b)
 
 		select {
-		case id := <-ch:
+		case id := <-userCh:
 			delete(addrPorts, id)
+		default:
+		}
+
+		select {
+		case graph := <-graphCh:
+			isGraph = graph
 		default:
 		}
 
@@ -291,9 +323,11 @@ func handleUDP(ch chan uint32) {
 					}
 				}
 			case pb.MovementVariant_MAP_UPDATE:
-				if isGraph {
-					handleMapUpdate(movementUpdate.MapPositionsUpdate, conn)
-				}
+				sf.TryExecute(func() {
+					if isGraph {
+						handleMapUpdate(movementUpdate.MapPositionsUpdate, conn)
+					}
+				})
 			}
 		}
 	}
@@ -350,8 +384,8 @@ func handleSendSpawnedEnemies() {
 func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 	enemies = make(map[uint32]*g.Enemy)
 	players = make(map[uint32]g.Coordinate)
-	isGraph = false
-	isSpawned = false
+	isSpawned.Store(false)
+	isMapUpdated.Store(false)
 
 	responseMsg := pb.StateUpdate{
 		Variant: pb.StateVariant_ROOM_CHANGED,
@@ -404,6 +438,8 @@ func handleMapDimensionUpdate(update []byte) {
 		minWidth = min(minWidth, int32(obstacle.Left))
 	}
 
+	algorithm.Mutex.Lock()
+	defer algorithm.Mutex.Unlock()
 	algorithm.SetWidth(int((maxWidth-minWidth)/SCALLING_FACTOR) + 1)
 	algorithm.SetHeight(int((maxHeight-minHeight)/SCALLING_FACTOR) + 1)
 	algorithm.SetOffset(int(minWidth/SCALLING_FACTOR), int(minHeight/SCALLING_FACTOR))
@@ -411,7 +447,6 @@ func handleMapDimensionUpdate(update []byte) {
 	algorithm.SetCollision(collisions)
 	algorithm.InitGraph()
 	collisions = make([]g.Coordinate, 0)
-	isGraph = true
 	logger.Debug("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
 }
 
@@ -443,7 +478,7 @@ func handleSpawnEnemyRequest(enemiesToSpawn []*pb.Enemy) {
 		enemyId := spawnEnemy(enemyToSpawn)
 		spawnedEnemiesIds = append(spawnedEnemiesIds, enemyId)
 	}
-	isSpawned = true
+	isSpawned.Store(true)
 }
 
 func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
@@ -473,6 +508,8 @@ func convertToCollision(obstacle *pb.Obstacle) g.Coordinate {
 }
 
 func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
+	algorithm.Mutex.Lock()
+
 	addPlayers(update.Players)
 	addEnemies(update.Enemies)
 
@@ -481,6 +518,8 @@ func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
 
 	algorithm.CreateDistancesMap()
 	algorithm.ClearGraph()
+
+	algorithm.Mutex.Unlock()
 
 	responseMsg := &pb.MovementUpdate{
 		Variant: pb.MovementVariant_MAP_UPDATE,
@@ -535,10 +574,17 @@ func main() {
 
 	log.Printf("Starting server on: %v\n", ip)
 
-	ch := make(chan uint32, 32)
-	go handleUDP(ch)
+	userCh := make(chan uint32, 32)
+	graphCh := make(chan bool)
+	isSpawned.Store(false)
+	isMapUpdated.Store(false)
+
+	//mapDimensionsCh <- false
+	sf := NewSingleFlight()
+
+	go handleUDP(userCh, graphCh, sf)
 	go listenTCP()
-	go handleTCP(ch)
+	go handleTCP(userCh, graphCh)
 
 	for {
 	}
