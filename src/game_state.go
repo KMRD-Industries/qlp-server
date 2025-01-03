@@ -42,7 +42,7 @@ func newGame() *Game {
 		players:   players,
 		generator: newGenerator(MAX_PLAYERS + 1),
 		seed:      time.Now().Unix(),
-		playerIDs: newIDPool(1),
+		playerIDs: newIDPool(PLAYER_MIN_ID, PLAYER_MAX_ID),
 	}
 }
 
