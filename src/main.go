@@ -196,13 +196,13 @@ func handleTCP(userCh chan uint32, graphCh chan bool) {
 			var prefixMsg pb.BytePrefix
 			err = proto.Unmarshal(encodedPrefixMsg, &prefixMsg)
 			if err != nil {
-				logger.Info("Couldn't unmarshall prefix message, err: ", err)
+				logger.Info("Couldn't unmarshall prefix message", "error", err)
 			}
 
 			size := prefixMsg.GetBytes() - DIFF
 			_, err = reader.Peek(int(size))
 			if err != nil {
-				logger.Info("there is not enough bytes to read for this message\nmessage size %d, err: %v\n", size, err)
+				logger.Info("Not enough bytes to read", "message size", size, "error", err)
 				continue
 			}
 
@@ -215,7 +215,7 @@ func handleTCP(userCh chan uint32, graphCh chan bool) {
 				}
 
 				for _, update := range updateSeries.GetUpdates() {
-					logger.Info("state update: %v\n", update)
+					logger.Info("Incoming state update", "update", update)
 
 					switch update.Variant {
 					case pb.StateVariant_REQUEST_ITEM_GENERATOR:
@@ -295,7 +295,7 @@ func handleUDP(userCh chan uint32, graphCh chan bool, sf *SingleFlight) {
 
 			err = proto.Unmarshal(b[:n], movementUpdate)
 			if err != nil {
-				logger.Info("Failed to deserialize: %v\n", err)
+				logger.Info("Failed to deserialize", "error", err)
 				continue
 			}
 
@@ -367,16 +367,16 @@ func handleSendSpawnedEnemies() {
 
 	serializedMsg, err := proto.Marshal(responseMsg)
 	if err != nil {
-		logger.Info("Failed to serialize enemy spawn request response, err: %s\n", err)
+		logger.Info("Failed to serialize enemy spawn request response", "error", err)
 	}
 
 	encoded := addPrefixAndPadding(serializedMsg)
 
 	for playerId, conn := range tcpConns {
-		logger.Debug("Sent spawned enemies to player %d\n", playerId)
+		logger.Debug("Sent spawned enemies to player", "playerId", playerId)
 		_, err2 := conn.Write(encoded)
 		if err2 != nil {
-			logger.Info("Couldn't send spawned enemies to the client, err: %s\n", err2)
+			logger.Info("Couldn't send spawned enemies to the client", "error", err2)
 		}
 	}
 }
@@ -394,7 +394,7 @@ func handleRoomChange(msg *pb.StateUpdate, id uint32) {
 
 	serializedMsg, err := proto.Marshal(&responseMsg)
 	if err != nil {
-		logger.Info("failed to serialize enemy spawn request response, err: %s\n", err)
+		logger.Info("Failed to serialize enemy spawn request response", "error", err)
 	}
 
 	encoded := addPrefixAndPadding(serializedMsg)
@@ -411,7 +411,7 @@ func addPrefixAndPadding(serializedMsg []byte) []byte {
 
 	serialisedPrefix, err := proto.Marshal(prefix)
 	if err != nil {
-		logger.Info("failed to serialize enemy spawn request response, err: %s\n", err)
+		logger.Info("Failed to serialize enemy spawn request response", "error", err)
 	}
 
 	return append(serialisedPrefix, serializedMsg...)
@@ -427,7 +427,7 @@ func handleMapDimensionUpdate(update []byte) {
 
 	var mapDimensionUpdate pb.MapDimensionsUpdate
 	if err := proto.Unmarshal(decompressedUpdate, &mapDimensionUpdate); err != nil {
-		logger.Info("failed to unmarshal decompressedUpd")
+		logger.Info("Failed to unmarshal decompressedUpd")
 	}
 
 	for _, obstacle := range mapDimensionUpdate.Obstacles {
@@ -447,20 +447,19 @@ func handleMapDimensionUpdate(update []byte) {
 	algorithm.SetCollision(collisions)
 	algorithm.InitGraph()
 	collisions = make([]g.Coordinate, 0)
-	logger.Debug("Map size is %d\n -------------------------\n", len(mapDimensionUpdate.Obstacles))
 }
 
 func decompressMessage(update []byte) []byte {
 	zLibReader, err := zlib.NewReader(bytes.NewReader(update))
 	if err != nil {
-		logger.Info("failed to create zlib reader: %v\n", err)
+		logger.Info("Failed to create zlib reader", "error", err)
 		return nil
 	}
 	defer zLibReader.Close()
 
 	decompressedUpdate, err := io.ReadAll(zLibReader)
 	if err != nil {
-		logger.Info("failed to decompress map dimension update data: %v\n", err)
+		logger.Info("Failed to decompress map dimension update data", "error", err)
 	}
 	return decompressedUpdate
 }
@@ -495,7 +494,6 @@ func spawnEnemy(enemyToSpawn *pb.Enemy) uint32 {
 		enemyConfig.TextureData,
 		enemyConfig.CollisionData,
 	)
-	//log.Printf("Spawned enemy with id: %d, position %f %f, hp: %f\n", newEnemyId, enemyToSpawn.PositionX, enemyToSpawn.PositionY, enemyConfig.HP)
 
 	return newEnemyId
 }
@@ -532,7 +530,7 @@ func handleMapUpdate(update *pb.MapPositionsUpdate, conn *net.UDPConn) {
 
 	serializedMsg, err := proto.Marshal(responseMsg)
 	if err != nil {
-		logger.Info("Failed to serialize enemy positions update, err: %s\n", err)
+		logger.Info("Failed to serialize enemy positions update", "error", err)
 	}
 
 	for _, addrPort := range addrPorts {
@@ -563,7 +561,7 @@ func main() {
 	var err error
 	config, err = u.NewJsonParser().ParseConfig("utils/config.json")
 	if err != nil {
-		logger.Info("error while parsing config, err: %s\n", err)
+		logger.Info("Error while parsing config", err)
 		return
 	}
 	flag.Parse()
