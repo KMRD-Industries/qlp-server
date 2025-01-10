@@ -1,0 +1,32 @@
+name: Build and Release for Windows
+
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.22.1
+
+    - name: Compile binary
+      run: |
+        set CGO_ENABLED=0
+        go build -o qlp-server.exe -ldflags "-s -w"
+
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./qlp-server.exe
+        asset_name: qlp-server-windows.exe
+        asset_content_type: application/octet-stream
