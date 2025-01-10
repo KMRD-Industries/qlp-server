@@ -559,9 +559,9 @@ func addEnemies(enemiesProto []*pb.Enemy) {
 
 func main() {
 	var err error
-	config, err = u.NewJsonParser().ParseConfig("utils/config.json")
+	config, err = u.NewJsonParser().ParseConfig("config.json")
 	if err != nil {
-		logger.Info("Error while parsing config", err)
+		logger.Info("Couldn't parse config", "error", err)
 		return
 	}
 	flag.Parse()

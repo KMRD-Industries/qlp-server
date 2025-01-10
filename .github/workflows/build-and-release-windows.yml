@@ -26,12 +26,16 @@ jobs:
         set CGO_ENABLED=0
         go build -o qlp-server.exe -ldflags "-s -w" ./src
 
+    - name: Create ZIP file
+      run: |
+        powershell Compress-Archive -Path qlp-server.exe,config.json -DestinationPath res.zip
+
     - name: Upload release asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: ./qlp-server.exe
-        asset_name: qlp-server-windows.exe
-        asset_content_type: application/octet-stream
+        asset_path: ./res.zip
+        asset_name: qlp-server-windows.zip
+        asset_content_type: application/zip
