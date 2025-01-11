@@ -1,0 +1,40 @@
+name: Build and Release for Linux
+
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.22.1
+
+    - name: Compile binary
+      run: |
+        CGO_ENABLED=0 go build -o qlp-server -ldflags '-s -w' ./src
+
+    - name: Create ZIP file
+      run: |
+        zip -j res.zip qlp-server config.json
+
+    - name: Upload release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./res.zip
+        asset_name: qlp-server-linux.zip
+        asset_content_type: application/zip
